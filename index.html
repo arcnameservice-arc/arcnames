@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js" type="application/javascript"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js" integrity="sha512-BMkXMZn7bFMlTHEYKJWCnU7+oGJzCDfRHkFAiGlWnVMFDFILXFvdTBWusSl6MJiQlmCPzIWXCCuvC3CQtQpg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <style>
   /* ── Theme variables ── */
   :root {
@@ -1874,34 +1874,35 @@
 <div class="modal-overlay" id="walletModal">
   <div class="modal">
     <h3>Connect Wallet</h3>
-    <p id="walletModalSub">Choose a wallet to connect to Arc Testnet</p>
+    <p id="walletModalSub">Detected wallets in your browser</p>
+
+    <!-- Detected wallets via EIP-6963 -->
     <div class="wallet-opts" id="walletOpts">
-      <div class="wallet-opt" id="metamaskOpt" onclick="connectMetaMask()">
-        <div class="w-icon" style="background:#F6851B22">🦊</div>
-        <div style="flex:1">
-          <div>MetaMask</div>
-          <div style="font-size:12px;color:var(--muted2);font-weight:400" id="metamaskStatus">Connect with MetaMask</div>
-        </div>
-        <div id="metamaskBadge" style="display:none;font-size:11px;background:rgba(16,185,129,0.1);color:var(--success);border:1px solid rgba(16,185,129,0.3);padding:2px 8px;border-radius:20px;font-weight:700">Connected</div>
-      </div>
-      <div class="wallet-opt" style="opacity:0.5;cursor:not-allowed" title="Coming soon">
-        <div class="w-icon" style="background:#3B99FC22">🔗</div>
-        <div style="flex:1">
-          <div>WalletConnect</div>
-          <div style="font-size:12px;color:var(--muted2);font-weight:400">Coming soon</div>
-        </div>
+      <div style="text-align:center;padding:20px;color:var(--muted2);font-size:13px" id="walletScanMsg">
+        <div style="font-size:24px;margin-bottom:8px">🔍</div>
+        Scanning for wallets…
       </div>
     </div>
+
+    <!-- Fallback: no wallet found -->
+    <div id="noWalletMsg" style="display:none;margin-top:12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--muted2);text-align:center">
+      No wallet detected.<br>
+      <a href="https://metamask.io/download/" target="_blank" style="color:var(--arc)">Install MetaMask</a> or
+      <a href="https://rabby.io" target="_blank" style="color:var(--arc)">Rabby</a>
+    </div>
+
     <!-- Network warning -->
     <div id="networkWarning" style="display:none;margin-top:14px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--warn)">
-      ⚠ Wrong network detected. Click below to switch to Arc Testnet.
+      ⚠ Wrong network. Click below to switch to Arc Testnet.
       <button onclick="switchToArcTestnet()" style="display:block;margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid var(--warn);background:rgba(245,158,11,0.1);color:var(--warn);font-size:13px;font-family:'Space Grotesk',sans-serif;font-weight:700;cursor:pointer">Switch to Arc Testnet</button>
     </div>
+
     <!-- Connected state -->
     <div id="connectedInfo" style="display:none;margin-top:14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:10px;padding:12px 14px">
       <div style="font-size:12px;color:var(--muted2);margin-bottom:4px">Connected address</div>
-      <div style="font-family:'Space Mono',monospace;font-size:13px;color:var(--text);word-break:break-all" id="connectedAddr">—</div>
+      <div style="font-family:'Space Mono',monospace;font-size:12px;color:var(--text);word-break:break-all" id="connectedAddr">—</div>
     </div>
+
     <button class="modal-close" id="walletModalClose" onclick="closeModal('walletModal')">Cancel</button>
     <button id="disconnectBtn" style="display:none;width:100%;margin-top:8px;padding:10px;border-radius:10px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.06);color:var(--danger);font-size:14px;cursor:pointer;font-family:'Space Grotesk',sans-serif;font-weight:600" onclick="disconnectWallet()">Disconnect</button>
   </div>
@@ -3227,104 +3228,185 @@
     }
   }
 
-  // ── Wallet — Arc Testnet ──
+  // ── Wallet — Arc Testnet (EIP-6963 multi-wallet) ──
   const ARC_TESTNET = {
-    chainId:         '0x4CEDF2',   // 5042002 decimal
-    chainName:       'Arc Testnet',
-    nativeCurrency:  { name: 'USDC', symbol: 'USDC', decimals: 18 },
-    rpcUrls:         ['https://rpc.testnet.arc.network'],
+    chainId:           '0x4CEDF2',   // 5042002 decimal
+    chainName:         'Arc Testnet',
+    nativeCurrency:    { name: 'USDC', symbol: 'USDC', decimals: 18 },
+    rpcUrls:           ['https://rpc.testnet.arc.network'],
     blockExplorerUrls: ['https://testnet.arcscan.app'],
   };
   const ARC_CHAIN_ID_DEC = 5042002;
 
-  let provider   = null;  // ethers.providers.Web3Provider
-  let signer     = null;
+  let provider        = null;
+  let signer          = null;
+  let activeEIP1193   = null; // the raw EIP-1193 provider in use
+  let detectedWallets = [];   // EIP-6963 discovered providers
+
+  // ── EIP-6963 wallet discovery ──
+  function discoverWallets() {
+    detectedWallets = [];
+    const seen = new Set();
+
+    const handler = (event) => {
+      const detail = event.detail;
+      if (!detail || !detail.info || !detail.provider) return;
+      if (seen.has(detail.info.uuid)) return;
+      seen.add(detail.info.uuid);
+      detectedWallets.push(detail);
+    };
+
+    window.addEventListener('eip6963:announceProvider', handler);
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+    // Give wallets 300ms to announce, then render
+    return new Promise(resolve => {
+      setTimeout(() => {
+        window.removeEventListener('eip6963:announceProvider', handler);
+        resolve(detectedWallets);
+      }, 300);
+    });
+  }
 
   function showWalletModal() {
-    const modal = document.getElementById('walletModal');
-    // If already connected, show connected state
     if (walletConnected) {
       document.getElementById('connectedInfo').style.display = 'block';
-      document.getElementById('connectedAddr').textContent = walletAddress;
+      document.getElementById('connectedAddr').textContent   = walletAddress;
       document.getElementById('disconnectBtn').style.display = 'block';
       document.getElementById('walletModalClose').textContent = 'Close';
-      document.getElementById('metamaskBadge').style.display = 'block';
       document.getElementById('networkWarning').style.display = 'none';
+      document.getElementById('noWalletMsg').style.display   = 'none';
     } else {
       document.getElementById('connectedInfo').style.display = 'none';
       document.getElementById('disconnectBtn').style.display = 'none';
       document.getElementById('walletModalClose').textContent = 'Cancel';
-      document.getElementById('metamaskBadge').style.display = 'none';
       document.getElementById('networkWarning').style.display = 'none';
+      // Scan for wallets
+      renderWalletList();
     }
-    modal.classList.add('show');
+    document.getElementById('walletModal').classList.add('show');
   }
 
-  async function connectMetaMask() {
-    if (typeof window.ethereum === 'undefined') {
-      showToast('MetaMask not found — please install it');
-      window.open('https://metamask.io/download/', '_blank');
+  async function renderWalletList() {
+    const optsEl   = document.getElementById('walletOpts');
+    const noWallet = document.getElementById('noWalletMsg');
+    const scanMsg  = document.getElementById('walletScanMsg');
+
+    optsEl.innerHTML = `<div style="text-align:center;padding:20px;color:var(--muted2);font-size:13px" id="walletScanMsg">
+      <div style="font-size:24px;margin-bottom:8px">🔍</div>Scanning for wallets…</div>`;
+    noWallet.style.display = 'none';
+
+    const wallets = await discoverWallets();
+
+    // Also check legacy window.ethereum as fallback
+    if (wallets.length === 0 && window.ethereum) {
+      wallets.push({
+        info: { uuid: 'legacy', name: window.ethereum.isRabby ? 'Rabby' : (window.ethereum.isCoinbaseWallet ? 'Coinbase Wallet' : 'Browser Wallet'), icon: '' },
+        provider: window.ethereum,
+      });
+    }
+
+    optsEl.innerHTML = '';
+
+    if (wallets.length === 0) {
+      noWallet.style.display = 'block';
       return;
     }
 
-    const metamaskOpt = document.getElementById('metamaskOpt');
-    const statusEl    = document.getElementById('metamaskStatus');
-    statusEl.textContent = 'Connecting…';
-    metamaskOpt.style.opacity = '0.7';
-    metamaskOpt.style.pointerEvents = 'none';
+    wallets.forEach(wallet => {
+      const { name, icon } = wallet.info;
+      const iconHtml = icon
+        ? `<img src="${icon}" style="width:28px;height:28px;border-radius:6px;object-fit:contain">`
+        : `<div style="width:28px;height:28px;border-radius:6px;background:var(--arc-dim);display:flex;align-items:center;justify-content:center;font-size:16px">🔌</div>`;
+
+      const opt = document.createElement('div');
+      opt.className = 'wallet-opt';
+      opt.innerHTML = `
+        <div class="w-icon" style="background:transparent;padding:0">${iconHtml}</div>
+        <div style="flex:1">
+          <div style="font-weight:600">${name}</div>
+          <div style="font-size:12px;color:var(--muted2)">Click to connect</div>
+        </div>`;
+      opt.onclick = () => connectWalletProvider(wallet.provider, name);
+      optsEl.appendChild(opt);
+    });
+  }
+
+  async function connectWalletProvider(eip1193, walletName) {
+    // Disable all wallet opts while connecting
+    document.querySelectorAll('#walletOpts .wallet-opt').forEach(el => {
+      el.style.opacity = '0.5';
+      el.style.pointerEvents = 'none';
+    });
 
     try {
       // 1. Request accounts
-      provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
-      await provider.send('eth_requestAccounts', []);
-      signer = provider.getSigner();
+      await eip1193.request({ method: 'eth_requestAccounts' });
+      activeEIP1193 = eip1193;
+
+      provider = new ethers.providers.Web3Provider(eip1193, 'any');
+      signer   = provider.getSigner();
       const address = await signer.getAddress();
 
-      // 2. Check / switch to Arc Testnet
+      // 2. Switch to Arc Testnet
       const network = await provider.getNetwork();
       if (network.chainId !== ARC_CHAIN_ID_DEC) {
-        statusEl.textContent = 'Switching network…';
-        await switchToArcTestnet();
-        // Re-initialize provider after network switch
-        provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
-        signer = provider.getSigner();
+        await switchToArcTestnetWith(eip1193);
+        provider = new ethers.providers.Web3Provider(eip1193, 'any');
+        signer   = provider.getSigner();
       }
 
-      // 3. Verify we're on Arc Testnet now
-      const finalNetwork = await provider.getNetwork();
-      if (finalNetwork.chainId !== ARC_CHAIN_ID_DEC) {
+      // 3. Verify network
+      const finalNet = await provider.getNetwork();
+      if (finalNet.chainId !== ARC_CHAIN_ID_DEC) {
         throw new Error('Please switch to Arc Testnet to continue');
       }
 
-      // 4. Update state
       walletConnected = true;
       walletAddress   = address;
-      onWalletConnected(address, 'MetaMask');
+      onWalletConnected(address, walletName, eip1193);
 
     } catch (err) {
       console.error('Wallet connect error:', err);
-      const msg = err.code === 4001 ? 'Connection rejected by user'
-                : err.message || 'Connection failed';
+      const msg = (err.code === 4001 || err.code === 'ACTION_REJECTED')
+        ? 'Connection rejected'
+        : (err.message || 'Connection failed');
       showToast('⚠ ' + msg);
-    } finally {
-      statusEl.textContent = 'Connect with MetaMask';
-      metamaskOpt.style.opacity = '';
-      metamaskOpt.style.pointerEvents = '';
+      // Re-enable
+      document.querySelectorAll('#walletOpts .wallet-opt').forEach(el => {
+        el.style.opacity = '';
+        el.style.pointerEvents = '';
+      });
     }
   }
 
+  // Legacy MetaMask fallback (called if EIP-6963 not available)
+  async function connectMetaMask() {
+    if (typeof window.ethereum === 'undefined') {
+      showToast('No wallet found — install MetaMask or Rabby');
+      window.open('https://metamask.io/download/', '_blank');
+      return;
+    }
+    await connectWalletProvider(window.ethereum, 'Browser Wallet');
+  }
+
   async function switchToArcTestnet() {
-    if (typeof window.ethereum === 'undefined') return;
+    if (activeEIP1193) {
+      await switchToArcTestnetWith(activeEIP1193);
+    } else if (window.ethereum) {
+      await switchToArcTestnetWith(window.ethereum);
+    }
+  }
+
+  async function switchToArcTestnetWith(eip1193) {
     try {
-      // Try switching first
-      await window.ethereum.request({
+      await eip1193.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: ARC_TESTNET.chainId }],
       });
     } catch (switchErr) {
-      // Error 4902: chain not added yet
-      if (switchErr.code === 4902) {
-        await window.ethereum.request({
+      if (switchErr.code === 4902 || switchErr.code === -32603) {
+        await eip1193.request({
           method: 'wallet_addEthereumChain',
           params: [ARC_TESTNET],
         });
@@ -3334,45 +3416,48 @@
     }
   }
 
-  function onWalletConnected(address, walletName) {
+  function onWalletConnected(address, walletName, eip1193) {
     const short = address.slice(0, 6) + '…' + address.slice(-4);
 
-    // Desktop connect button
+    // Nav connect button
     const btn = document.getElementById('connectBtn');
-    btn.textContent = short;
-    btn.style.background = 'rgba(16,185,129,0.1)';
-    btn.style.borderColor = 'var(--success)';
-    btn.style.color = 'var(--success)';
+    if (btn) {
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>${short}`;
+      btn.style.background   = 'rgba(16,185,129,0.1)';
+      btn.style.borderColor  = 'var(--success)';
+      btn.style.color        = 'var(--success)';
+    }
 
     // Chain badge
-    document.getElementById('chainBadge').style.display = 'flex';
+    const badge = document.getElementById('chainBadge');
+    if (badge) badge.style.display = 'flex';
 
     // Mobile connect button
     const mb = document.getElementById('mobileConnectBtn');
     if (mb) {
       mb.querySelector('span').textContent = short;
-      mb.style.borderColor = 'var(--success)';
-      mb.style.color = 'var(--success)';
-      mb.style.background = 'rgba(16,185,129,0.1)';
+      mb.style.borderColor  = 'var(--success)';
+      mb.style.color        = 'var(--success)';
+      mb.style.background   = 'rgba(16,185,129,0.1)';
     }
 
-    // Update modal connected state
-    document.getElementById('connectedInfo').style.display = 'block';
-    document.getElementById('connectedAddr').textContent = address;
-    document.getElementById('disconnectBtn').style.display = 'block';
+    // Modal state
+    document.getElementById('connectedInfo').style.display  = 'block';
+    document.getElementById('connectedAddr').textContent    = address;
+    document.getElementById('disconnectBtn').style.display  = 'block';
     document.getElementById('walletModalClose').textContent = 'Close';
-    document.getElementById('metamaskBadge').style.display = 'block';
     document.getElementById('networkWarning').style.display = 'none';
 
     closeModal('walletModal');
     showToast(`✓ ${walletName} connected to Arc Testnet`);
 
-    // Trigger My Names load if already on that page
     loadMyNames();
 
-    // Listen for account / chain changes
-    window.ethereum.on('accountsChanged', onAccountsChanged);
-    window.ethereum.on('chainChanged', onChainChanged);
+    // Listen for changes
+    if (eip1193) {
+      eip1193.on?.('accountsChanged', onAccountsChanged);
+      eip1193.on?.('chainChanged',    onChainChanged);
+    }
   }
 
   function onAccountsChanged(accounts) {
@@ -3380,8 +3465,9 @@
       disconnectWallet();
     } else {
       walletAddress = accounts[0];
-      const short = walletAddress.slice(0, 6) + '…' + walletAddress.slice(-4);
-      document.getElementById('connectBtn').textContent = short;
+      const short   = walletAddress.slice(0, 6) + '…' + walletAddress.slice(-4);
+      const btn = document.getElementById('connectBtn');
+      if (btn) btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>${short}`;
       document.getElementById('connectedAddr').textContent = walletAddress;
     }
   }
@@ -3389,13 +3475,14 @@
   function onChainChanged(chainIdHex) {
     const chainId = parseInt(chainIdHex, 16);
     if (chainId !== ARC_CHAIN_ID_DEC) {
-      // Show warning in modal
       document.getElementById('networkWarning').style.display = 'block';
-      document.getElementById('chainBadge').style.display = 'none';
+      const badge = document.getElementById('chainBadge');
+      if (badge) badge.style.display = 'none';
       showToast('⚠ Switched away from Arc Testnet');
     } else {
       document.getElementById('networkWarning').style.display = 'none';
-      document.getElementById('chainBadge').style.display = 'flex';
+      const badge = document.getElementById('chainBadge');
+      if (badge) badge.style.display = 'flex';
     }
   }
 
@@ -3406,51 +3493,64 @@
     signer          = null;
 
     const btn = document.getElementById('connectBtn');
-    btn.textContent = 'Connect Wallet';
-    btn.style.background = '';
-    btn.style.borderColor = '';
-    btn.style.color = '';
+    if (btn) {
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>Connect Wallet`;
+      btn.style.background  = '';
+      btn.style.borderColor = '';
+      btn.style.color       = '';
+    }
 
-    document.getElementById('chainBadge').style.display = 'none';
+    const badge = document.getElementById('chainBadge');
+    if (badge) badge.style.display = 'none';
 
     const mb = document.getElementById('mobileConnectBtn');
     if (mb) {
       mb.querySelector('span').textContent = 'Wallet';
       mb.style.borderColor = '';
-      mb.style.color = '';
-      mb.style.background = '';
+      mb.style.color       = '';
+      mb.style.background  = '';
     }
 
-    document.getElementById('connectedInfo').style.display = 'none';
-    document.getElementById('disconnectBtn').style.display = 'none';
-    document.getElementById('metamaskBadge').style.display = 'none';
+    document.getElementById('connectedInfo').style.display  = 'none';
+    document.getElementById('disconnectBtn').style.display  = 'none';
     document.getElementById('walletModalClose').textContent = 'Cancel';
 
-    if (window.ethereum) {
-      window.ethereum.removeListener('accountsChanged', onAccountsChanged);
-      window.ethereum.removeListener('chainChanged', onChainChanged);
+    if (activeEIP1193) {
+      activeEIP1193.removeListener?.('accountsChanged', onAccountsChanged);
+      activeEIP1193.removeListener?.('chainChanged',    onChainChanged);
+      activeEIP1193 = null;
     }
 
     closeModal('walletModal');
     showToast('Wallet disconnected');
   }
 
-  // Auto-reconnect if MetaMask was already authorized
+  // Auto-reconnect on page load
   async function tryAutoConnect() {
-    if (typeof window.ethereum === 'undefined') return;
-    try {
-      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-      if (accounts && accounts.length > 0) {
-        provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
-        signer   = provider.getSigner();
-        const network = await provider.getNetwork();
-        if (network.chainId === ARC_CHAIN_ID_DEC) {
-          walletConnected = true;
-          walletAddress   = accounts[0];
-          onWalletConnected(accounts[0], 'MetaMask');
+    // Try EIP-6963 first
+    const wallets = await discoverWallets();
+    const allProviders = wallets.length > 0
+      ? wallets.map(w => w.provider)
+      : (window.ethereum ? [window.ethereum] : []);
+
+    for (const eip1193 of allProviders) {
+      try {
+        const accounts = await eip1193.request({ method: 'eth_accounts' });
+        if (accounts && accounts.length > 0) {
+          provider = new ethers.providers.Web3Provider(eip1193, 'any');
+          signer   = provider.getSigner();
+          const network = await provider.getNetwork();
+          if (network.chainId === ARC_CHAIN_ID_DEC) {
+            activeEIP1193   = eip1193;
+            walletConnected = true;
+            walletAddress   = accounts[0];
+            const wName = wallets.find(w => w.provider === eip1193)?.info?.name || 'Wallet';
+            onWalletConnected(accounts[0], wName, eip1193);
+            return; // connected, stop
+          }
         }
-      }
-    } catch (e) { /* silently fail */ }
+      } catch (e) { /* try next */ }
+    }
   }
 
   // ── Toast ──
