@@ -2009,6 +2009,8 @@
 
   // ── Nav ──
   // ── Active page tracking + polling ──
+  const PAGE_ROUTES = { search: '/search', mynames: '/myname', market: '/market', stats: '/stats' };
+  const ROUTE_PAGES = { '/search': 'search', '/myname': 'mynames', '/market': 'market', '/stats': 'stats' };
   let currentPage      = 'search';
   let pollIntervals    = {};   // page → intervalId
 
@@ -2052,9 +2054,15 @@
   });
 
   // ── Nav ──
-  function showPage(id) {
+  function showPage(id, pushState = true) {
     stopAllPolling();
     currentPage = id;
+
+    // Update browser URL without reload
+    if (pushState) {
+      const path = PAGE_ROUTES[id] || '/search';
+      history.pushState({ page: id }, '', path);
+    }
 
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
@@ -4228,11 +4236,44 @@
     }
   }
 
+  // ── Early URL-based routing (runs immediately, no ethers dependency) ──
+  (function() {
+    const path = window.location.pathname;
+    const pageId = ROUTE_PAGES[path] || 'search';
+
+    // Swap active page in DOM directly (showPage not yet safe to call)
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+
+    const pageEl = document.getElementById('page-' + pageId);
+    if (pageEl) pageEl.classList.add('active');
+    const navEl = document.getElementById('nav-' + pageId);
+    if (navEl) navEl.classList.add('active');
+    const mnavEl = document.getElementById('mnav-' + pageId);
+    if (mnavEl) mnavEl.classList.add('active');
+
+    currentPage = pageId;
+    history.replaceState({ page: pageId }, '', PAGE_ROUTES[pageId] || '/search');
+
+    // Handle browser back/forward navigation
+    window.addEventListener('popstate', function(e) {
+      const p = window.location.pathname;
+      showPage(ROUTE_PAGES[p] || 'search', false);
+    });
+  })();
+
   function initApp() {
     renderStats();          // stats ilk yüklemesi
     startPolling('stats');  // 60s polling
     startPolling('search'); // search sonuçları 30s yenile (currentSearch varsa)
     tryAutoConnect();
+
+    // Trigger load for the initial page if needed
+    if (currentPage === 'stats')   { loadOnChainStats(); startPolling('stats'); }
+    if (currentPage === 'market')  { renderMarket();     startPolling('market'); }
+    if (currentPage === 'mynames') { loadMyNames();      startPolling('mynames'); }
+
     // Hero stats: public RPC ile hemen yükle
     (async () => {
       try {
