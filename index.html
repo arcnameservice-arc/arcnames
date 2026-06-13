@@ -7,7 +7,22 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js" integrity="sha512-BMkXMZn7bFMlTHEYKJWCnU7+oGJzCDfRHkFAiGlWnVMFDFILXFvdTBWusSl6MJiQlmCPzIWXCCuvC3CQtQpg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+  // Load ethers.js reliably — try cdnjs first, fallback to unpkg
+  (function() {
+    var s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js';
+    s.integrity = 'sha512-FDcVY+g7vc5CXANbrTSg1K5qLyriCsGDYCE02Li1tXEYdNQPvLPHNE+rT2Mjei8N7fZbe0WLhw27j2SrGRpdMg==';
+    s.crossOrigin = 'anonymous';
+    s.referrerPolicy = 'no-referrer';
+    s.onerror = function() {
+      var fb = document.createElement('script');
+      fb.src = 'https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js';
+      document.head.appendChild(fb);
+    };
+    document.head.appendChild(s);
+  })();
+</script>
 <style>
   /* ── Theme variables ── */
   :root {
@@ -3333,6 +3348,12 @@
   }
 
   async function connectWalletProvider(eip1193, walletName) {
+    // Guard: ethers must be loaded
+    if (typeof ethers === 'undefined') {
+      showToast('⚠ Library loading failed — please refresh the page');
+      return;
+    }
+
     // Disable all wallet opts while connecting
     document.querySelectorAll('#walletOpts .wallet-opt').forEach(el => {
       el.style.opacity = '0.5';
@@ -4133,16 +4154,33 @@
   }
 
   // ── Init ──
-  renderMarket();
-  renderStats();
-  tryAutoConnect();
-  // Hero stats: load on page open with public RPC
-  (async () => {
-    try {
-      const pubProvider = new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
-      await fetchAndRenderStats(pubProvider);
-    } catch(e) { /* silent */ }
-  })();
+  // Wait for ethers to load before initializing
+  function waitForEthers(cb, attempts) {
+    attempts = attempts || 0;
+    if (typeof ethers !== 'undefined') {
+      cb();
+    } else if (attempts < 30) {
+      setTimeout(function() { waitForEthers(cb, attempts + 1); }, 200);
+    } else {
+      console.error('ethers.js failed to load after 6 seconds');
+      showToast('⚠ Failed to load ethers.js — please refresh');
+    }
+  }
+
+  function initApp() {
+    renderMarket();
+    renderStats();
+    tryAutoConnect();
+    // Hero stats: load on page open with public RPC
+    (async () => {
+      try {
+        const pubProvider = new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
+        await fetchAndRenderStats(pubProvider);
+      } catch(e) { /* silent */ }
+    })();
+  }
+
+  waitForEthers(initApp);
 </script>
 </body>
 </html>
