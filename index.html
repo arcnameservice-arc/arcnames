@@ -10,17 +10,33 @@
 <script>
   // Load ethers.js reliably — try cdnjs first, fallback to unpkg
   (function() {
-    var s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js';
-    s.integrity = 'sha512-FDcVY+g7vc5CXANbrTSg1K5qLyriCsGDYCE02Li1tXEYdNQPvLPHNE+rT2Mjei8N7fZbe0WLhw27j2SrGRpdMg==';
-    s.crossOrigin = 'anonymous';
-    s.referrerPolicy = 'no-referrer';
-    s.onerror = function() {
-      var fb = document.createElement('script');
-      fb.src = 'https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js';
-      document.head.appendChild(fb);
-    };
-    document.head.appendChild(s);
+    var loaded = false;
+    function tryLoad(src, integrity) {
+      var s = document.createElement('script');
+      s.src = src;
+      if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer'; }
+      s.onload = function() { loaded = true; };
+      s.onerror = function() {
+        if (!loaded) {
+          // Try unpkg fallback without integrity check
+          var fb = document.createElement('script');
+          fb.src = 'https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js';
+          fb.onload = function() { loaded = true; };
+          fb.onerror = function() {
+            // Last resort: jsDelivr
+            var fb2 = document.createElement('script');
+            fb2.src = 'https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js';
+            document.head.appendChild(fb2);
+          };
+          document.head.appendChild(fb);
+        }
+      };
+      document.head.appendChild(s);
+    }
+    tryLoad(
+      'https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js',
+      'sha512-FDcVY+g7vc5CXANbrTSg1K5qLyriCsGDYCE02Li1tXEYdNQPvLPHNE+rT2Mjei8N7fZbe0WLhw27j2SrGRpdMg=='
+    );
   })();
 </script>
 <style>
@@ -888,6 +904,7 @@
     margin-bottom: 16px;
     border: 3px solid var(--bg2);
     box-shadow: 0 0 0 3px var(--arc-dim);
+    overflow: hidden;
   }
 
   .profile-name-big {
@@ -1663,10 +1680,8 @@
   <div class="modal" style="width:400px">
     <h3>List for Sale</h3>
     <p>Set a price and list <strong id="sellModalName" style="color:var(--arc)">satoshi.arc</strong> on the marketplace.</p>
-    <!-- Market not deployed warning -->
-    <div id="sellMarketNote" style="display:none;margin-bottom:14px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:10px 14px;font-size:12px;color:var(--warn)">
-      ⚠ Market contract not yet deployed. Deploy ArcNameMarket.sol first.
-    </div>
+    <!-- Market deployed — no warning needed -->
+    <div id="sellMarketNote" style="display:none"></div>
     <div style="margin-bottom:16px">
       <div style="font-size:12px;color:var(--muted2);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;font-family:'Space Mono',monospace">Sale Price (USDC)</div>
       <div style="display:flex;align-items:center;background:var(--bg3);border:1.5px solid var(--border2);border-radius:10px;padding:10px 16px;gap:8px" id="sellPriceWrap">
@@ -1794,11 +1809,6 @@
           <textarea class="profile-input" id="pBio" placeholder="Short bio…" rows="2" style="resize:none;line-height:1.5"></textarea>
           <button class="btn-profile-save" onclick="saveProfileField('bio')" style="margin-top:2px">Save</button>
         </div>
-        <div class="profile-edit-row">
-          <span style="font-size:13px;color:var(--muted2);min-width:80px">Website</span>
-          <input class="profile-input" id="pWebsite" placeholder="https://…">
-          <button class="btn-profile-save" onclick="saveProfileField('website')">Save</button>
-        </div>
       </div>
 
       <!-- Social links -->
@@ -1808,21 +1818,6 @@
           <span style="font-size:16px">𝕏</span>
           <input class="profile-input" id="pTwitter" placeholder="@handle">
           <button class="btn-profile-save" onclick="saveProfileField('twitter')">Save</button>
-        </div>
-      </div>
-
-      <!-- Address mappings -->
-      <div class="profile-section">
-        <div class="profile-section-label">Address mappings</div>
-        <div class="profile-edit-row">
-          <span style="font-size:13px;color:var(--muted2);min-width:80px">ETH</span>
-          <input class="profile-input" id="pEthAddr" placeholder="0x…" style="font-family:'Space Mono',monospace;font-size:12px">
-          <button class="btn-profile-save" onclick="saveProfileField('ethAddr')">Save</button>
-        </div>
-        <div class="profile-edit-row">
-          <span style="font-size:13px;color:var(--muted2);min-width:80px">BTC</span>
-          <input class="profile-input" id="pBtcAddr" placeholder="bc1…" style="font-family:'Space Mono',monospace;font-size:12px">
-          <button class="btn-profile-save" onclick="saveProfileField('btcAddr')">Save</button>
         </div>
       </div>
 
@@ -1905,6 +1900,11 @@
       <a href="https://metamask.io/download/" target="_blank" style="color:var(--arc)">Install MetaMask</a> or
       <a href="https://rabby.io" target="_blank" style="color:var(--arc)">Rabby</a>
     </div>
+    <!-- Arc testnet faucet hint -->
+    <div style="margin-top:12px;font-size:12px;color:var(--muted2);text-align:center;line-height:1.6">
+      Need testnet USDC? Get 20 USDC free at<br>
+      <a href="https://faucet-v2.circle.com/" target="_blank" style="color:var(--arc);font-family:'Space Mono',monospace">faucet-v2.circle.com ↗</a>
+    </div>
 
     <!-- Network warning -->
     <div id="networkWarning" style="display:none;margin-top:14px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--warn)">
@@ -1937,9 +1937,12 @@
 
 <script>
   // ── Contract config ──
-  // ⚠ Deploy ArcNameRegistry.sol sonrası aşağıya kontrat adresini yaz:
-  const CONTRACT_ADDRESS = '0xBE267dcfC6eeB905e788358eAA792e2eCcB23F01';
-  const USDC_ADDRESS     = '0x3600000000000000000000000000000000000000';
+  const CONTRACT_ADDRESS    = '0xBE267dcfC6eeB905e788358eAA792e2eCcB23F01';
+  const USDC_ADDRESS        = '0x3600000000000000000000000000000000000000';
+  // Block at which the registry was deployed — used as starting point for event scans
+  const REGISTRY_DEPLOY_BLOCK = 46774056;
+  const MARKET_DEPLOY_BLOCK   = 46780922;
+  const PROFILE_DEPLOY_BLOCK  = 46783233;
 
   const REGISTRY_ABI = [
     "function isAvailable(string name) view returns (bool)",
@@ -1961,7 +1964,7 @@
   ];
 
   function getRegistry(withSigner = false) {
-    if (!provider || CONTRACT_ADDRESS === 'BURAYA_DEPLOY_ADRESINI_YAZ') return null;
+    if (!provider) return null;
     return new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, withSigner ? signer : provider);
   }
   function getUsdc(withSigner = false) {
@@ -2074,7 +2077,7 @@
     if (mb) mb.classList.add('active');
 
     // Immediate load + start polling
-    if (id === 'stats')   { loadOnChainStats(); startPolling('stats'); }
+    if (id === 'stats')   { renderBarChartSkeleton(); renderDistChartSkeleton(); loadOnChainStats(); startPolling('stats'); }
     if (id === 'market')  { renderMarket();     startPolling('market'); }
     if (id === 'mynames') { loadMyNames();      startPolling('mynames'); }
     if (id === 'search')  {                     startPolling('search'); }
@@ -2122,25 +2125,22 @@
     document.getElementById('resultActions').style.display = 'none';
     card.classList.add('show');
 
-    // Try on-chain check, fall back to local mock if contract not deployed
+    // Query on-chain — use wallet provider if connected, else public RPC
     let taken = false;
     let ownerAddr = null;
     let expiryTs  = null;
-    const registry = getRegistry();
 
-    if (registry) {
-      try {
-        const rec = await registry.getRecord(raw);
-        taken     = !rec.available;
-        ownerAddr = rec.nameOwner !== ethers.constants.AddressZero ? rec.nameOwner : null;
-        expiryTs  = rec.expiry.toNumber();
-      } catch (e) {
-        console.warn('Contract read failed, using local fallback:', e.message);
-        const MOCK_TAKEN = ['arc', 'defi', 'vito', 'nft', 'dao', 'eth', 'usdc', 'base'];
-        taken = MOCK_TAKEN.includes(raw);
-      }
-    } else {
-      // Contract not deployed yet — use local mock data
+    try {
+      const readProvider = provider
+        || new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const registry = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, readProvider);
+      const rec = await registry.getRecord(raw);
+      taken     = !rec.available;
+      ownerAddr = rec.nameOwner !== ethers.constants.AddressZero ? rec.nameOwner : null;
+      expiryTs  = rec.expiry.toNumber();
+    } catch (e) {
+      console.warn('getRecord failed:', e.message);
+      // Last-resort mock so the UI still renders something
       const MOCK_TAKEN = ['arc', 'defi', 'vito', 'nft', 'dao', 'eth', 'usdc', 'base'];
       taken = MOCK_TAKEN.includes(raw);
     }
@@ -2158,7 +2158,8 @@
         : '—';
       document.getElementById('resultPrice').innerHTML =
         `Registered by <strong>${ownerShort}</strong>` +
-        (expiryTs ? ` · Expires <strong>${expiryStr}</strong>` : '');
+        (expiryTs ? ` · Expires <strong>${expiryStr}</strong>` : '') +
+        ` · <a href="/profile/${raw}.arc" target="_blank" style="color:var(--arc);font-weight:600;text-decoration:none">View profile ↗</a>`;
       document.getElementById('regForm').style.display = 'none';
       document.getElementById('resultActions').style.display = 'none';
     } else {
@@ -2198,9 +2199,9 @@
     const registry = getRegistry(true);
     const usdcContract = getUsdc(true);
 
-    // If contract not deployed yet, show friendly error
+    // If wallet not connected, show friendly error
     if (!registry || !usdcContract) {
-      showToast('⚠ Contract not deployed yet — update CONTRACT_ADDRESS');
+      showToast('⚠ Connect wallet to register');
       return;
     }
 
@@ -2221,6 +2222,16 @@
     try {
       // Step 1: Get exact price from contract (USDC 6 decimals)
       const costBN = await registry.getPrice(name, years);
+
+      // Check USDC balance before proceeding
+      const balanceBN = await usdcContract.balanceOf(walletAddress);
+      if (balanceBN.lt(costBN)) {
+        const needed  = parseFloat(ethers.utils.formatUnits(costBN,    6)).toFixed(2);
+        const balance = parseFloat(ethers.utils.formatUnits(balanceBN, 6)).toFixed(2);
+        closeModal('txModal');
+        showToast(`⚠ Insufficient USDC — need $${needed}, have $${balance}`);
+        return;
+      }
 
       // Step 2: Approve USDC
       const approveTx = await usdcContract.approve(CONTRACT_ADDRESS, costBN);
@@ -2401,7 +2412,7 @@
     const registry     = getRegistry(true);
     const usdcContract = getUsdc(true);
     if (!registry || !usdcContract) {
-      showToast('⚠ Contract not deployed yet');
+      showToast('⚠ Connect wallet to continue');
       return;
     }
 
@@ -2526,7 +2537,9 @@
         await fetchAndRenderStats(pubProvider);
       } catch(e) {
         console.warn('Stats load failed (no wallet):', e.message);
-        setStatsLoadingState('Could not load — connect wallet or check RPC');
+        setStatsLoadingState('—');
+        const tsEl = document.getElementById('statsLastUpdated');
+        if (tsEl) tsEl.textContent = 'Could not connect to RPC';
       }
       return;
     }
@@ -2534,40 +2547,38 @@
   }
 
   async function fetchAndRenderStats(prov) {
-    setStatsLoadingState('Loading…');
+    setStatsLoadingState('…');
     try {
-      const registry = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, prov);
+      const registry     = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, prov);
       const currentBlock = await prov.getBlockNumber();
 
-      // Arc testnet ~2s block time → 10000 blocks ≈ ~5.5 hours
-      // Fetch in chunks of 9999 going back as far as possible (max 5 chunks = ~50k blocks ≈ ~27h)
-      const CHUNK = 9999;
-      const MAX_CHUNKS = 5;
+      // Scan from deploy block forward in 9999-block chunks.
+      // Arc testnet has a 10 000-block getLogs limit per request.
+      const CHUNK        = 9999;
+      const START_BLOCK  = REGISTRY_DEPLOY_BLOCK;  // 46 774 056
       let allReg = [], allRen = [], allTr = [];
 
-      for (let c = 0; c < MAX_CHUNKS; c++) {
-        const to   = currentBlock - (c * CHUNK);
-        const from = to - CHUNK + 1;
-        if (from < 0) break;
+      for (let from = START_BLOCK; from <= currentBlock; from += CHUNK) {
+        const to = Math.min(from + CHUNK - 1, currentBlock);
         try {
           const [reg, ren, tr] = await Promise.all([
             registry.queryFilter(registry.filters.Registered(), from, to),
             registry.queryFilter(registry.filters.Renewed(),    from, to),
-            registry.queryFilter(registry.filters.Transferred(),from, to),
+            registry.queryFilter(registry.filters.Transferred(), from, to),
           ]);
           allReg = allReg.concat(reg);
           allRen = allRen.concat(ren);
           allTr  = allTr.concat(tr);
         } catch(e) {
-          // Stop if we hit pruned state
-          break;
+          console.warn('Stats chunk error', from, '-', to, ':', e.message);
+          // continue with next chunk — don't abort the whole scan
         }
       }
 
       // ── KPI calculations ──
-      const totalReg    = allReg.length;
-      const totalUSDC   = allReg.reduce((s, e) => s + parseFloat(ethers.utils.formatUnits(e.args.paid, 6)), 0)
-                        + allRen.reduce((s, e) => s + parseFloat(ethers.utils.formatUnits(e.args.paid, 6)), 0);
+      const totalReg     = allReg.length;
+      const totalUSDC    = allReg.reduce((s, e) => s + parseFloat(ethers.utils.formatUnits(e.args.paid, 6)), 0)
+                         + allRen.reduce((s, e) => s + parseFloat(ethers.utils.formatUnits(e.args.paid, 6)), 0);
       const uniqueOwners = new Set(allReg.map(e => e.args.owner.toLowerCase())).size;
       const avgLen = totalReg > 0
         ? (allReg.reduce((s, e) => s + e.args.name.length, 0) / totalReg).toFixed(1)
@@ -2581,7 +2592,7 @@
       document.getElementById('kpi-renewals').textContent  = allRen.length.toLocaleString();
       document.getElementById('kpi-transfers').textContent = allTr.length.toLocaleString();
 
-      // ── Update hero row too ──
+      // ── Update hero stats row ──
       const heroTotal  = document.getElementById('hero-total');
       const heroUsdc   = document.getElementById('hero-usdc');
       const heroOwners = document.getElementById('hero-owners');
@@ -2589,15 +2600,16 @@
       if (heroUsdc)   heroUsdc.textContent   = '$' + totalUSDC.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
       if (heroOwners) heroOwners.textContent = uniqueOwners.toLocaleString();
 
-      // Show delta badge for total if > 0
-      if (totalReg > 0) {
-        const deltaEl = document.getElementById('kpi-total-delta');
-        deltaEl.textContent = `last ~${MAX_CHUNKS * CHUNK / 1000}k blocks`;
+      // ── Delta badge ──
+      const deltaEl = document.getElementById('kpi-total-delta');
+      if (deltaEl) {
+        deltaEl.textContent = 'all time';
         deltaEl.style.display = 'inline-flex';
       }
 
-      // ── Daily bar chart ──
-      // Group registrations by day (last 10 days)
+      // ── Daily bar chart (last 10 days) ──
+      // Arc testnet: ~2 s/block → 1 day ≈ 43 200 blocks
+      const BLOCKS_PER_DAY = 43200;
       const dayMap = {};
       const now = Date.now();
       for (let d = 9; d >= 0; d--) {
@@ -2605,60 +2617,71 @@
         dayMap[dayKey] = 0;
       }
       allReg.forEach(e => {
-        // estimate time from block (approx 2s/block)
-        const blocksAgo  = currentBlock - e.blockNumber;
-        const secsAgo    = blocksAgo * 2;
-        const eventDate  = new Date(Date.now() - secsAgo * 1000);
-        const key        = eventDate.toLocaleDateString('en-US', { weekday:'short' });
-        if (dayMap[key] !== undefined) dayMap[key]++;
+        const blocksAgo = currentBlock - e.blockNumber;
+        const secsAgo   = blocksAgo * 2;
+        const eventDate = new Date(Date.now() - secsAgo * 1000);
+        const key       = eventDate.toLocaleDateString('en-US', { weekday:'short' });
+        if (key in dayMap) dayMap[key]++;
       });
 
       const dayLabels = Object.keys(dayMap);
       const dayVals   = Object.values(dayMap);
       const maxVal    = Math.max(...dayVals, 1);
       dayLabels.forEach((label, i) => {
-        const barEl   = document.getElementById('bar-' + i);
+        const barEl   = document.getElementById('bar-'      + i);
         const labelEl = document.getElementById('barlabel-' + i);
         if (!barEl) return;
         const h = Math.max(4, (dayVals[i] / maxVal) * 90);
         barEl.style.height  = h + 'px';
         barEl.style.opacity = '1';
         barEl.title         = `${dayVals[i]} registrations`;
-        if (labelEl) labelEl.textContent = label.slice(0,2);
+        if (labelEl) labelEl.textContent = label.slice(0, 2);
       });
 
       // ── Length distribution ──
-      const lenCounts = [0, 0, 0, 0, 0]; // 2, 3, 4, 5, 6+
+      const lenCounts = [0, 0, 0, 0, 0]; // index → 2, 3, 4, 5, 6+
       allReg.forEach(e => {
         const l = e.args.name.length;
-        if (l === 2) lenCounts[0]++;
+        if      (l === 2) lenCounts[0]++;
         else if (l === 3) lenCounts[1]++;
         else if (l === 4) lenCounts[2]++;
         else if (l === 5) lenCounts[3]++;
-        else lenCounts[4]++;
+        else              lenCounts[4]++;
       });
       const maxLen = Math.max(...lenCounts, 1);
       lenCounts.forEach((count, i) => {
-        const pct = Math.round((count / maxLen) * 100);
-        const barEl   = document.getElementById('distbar-' + i);
+        const pct     = Math.round((count / maxLen) * 100);
+        const barEl   = document.getElementById('distbar-'   + i);
         const countEl = document.getElementById('distcount-' + i);
-        if (barEl)   barEl.style.width = pct + '%';
-        if (countEl) countEl.textContent = count;
+        if (barEl)   barEl.style.width    = pct + '%';
+        if (countEl) countEl.textContent  = count;
       });
 
-      // ── Activity feed ──
+      // ── Global activity feed ──
       const actEl = document.getElementById('globalActivity');
       if (!actEl) return;
       actEl.innerHTML = '';
 
-      // Combine and sort all events by block desc
+      // Transferred event: `name` is a non-indexed string in data, `to` is indexed topic[2]
       const allEvents = [
-        ...allReg.map(e => ({ type:'register', block: e.blockNumber, name: e.args.name,
-          detail: `Registered by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${ethers.utils.formatUnits(e.args.paid,6)} USDC` })),
-        ...allRen.map(e => ({ type:'renew',    block: e.blockNumber, name: e.args.name,
-          detail: `Renewed by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${ethers.utils.formatUnits(e.args.paid,6)} USDC` })),
-        ...allTr.map(e  => ({ type:'transfer', block: e.blockNumber, name: e.args.name,
-          detail: `Transferred to ${e.args.to.slice(0,6)}…${e.args.to.slice(-4)}` })),
+        ...allReg.map(e => ({
+          type:   'register',
+          block:  e.blockNumber,
+          name:   e.args.name,
+          detail: `Registered by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2)} USDC`,
+        })),
+        ...allRen.map(e => ({
+          type:   'renew',
+          block:  e.blockNumber,
+          name:   e.args.name,
+          detail: `Renewed by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2)} USDC`,
+        })),
+        ...allTr.map(e => ({
+          type:   'transfer',
+          block:  e.blockNumber,
+          name:   e.args.name  || '?',
+          detail: `Transferred to ${(e.args.to || '').slice(0,6)}…${(e.args.to || '').slice(-4)}`,
+        })),
       ].sort((a, b) => b.block - a.block).slice(0, 10);
 
       if (allEvents.length === 0) {
@@ -2669,9 +2692,9 @@
           const blocksAgo = currentBlock - a.block;
           const secsAgo   = blocksAgo * 2;
           const timeStr   = secsAgo < 60    ? `${secsAgo}s ago`
-                          : secsAgo < 3600  ? `${Math.floor(secsAgo/60)}m ago`
-                          : secsAgo < 86400 ? `${Math.floor(secsAgo/3600)}h ago`
-                          : `${Math.floor(secsAgo/86400)}d ago`;
+                          : secsAgo < 3600  ? `${Math.floor(secsAgo / 60)}m ago`
+                          : secsAgo < 86400 ? `${Math.floor(secsAgo / 3600)}h ago`
+                          :                   `${Math.floor(secsAgo / 86400)}d ago`;
           actEl.innerHTML += `
             <div class="activity-mini-item">
               <div class="activity-type-dot ${a.type}"></div>
@@ -2690,14 +2713,17 @@
 
     } catch(e) {
       console.error('fetchAndRenderStats error:', e);
-      setStatsLoadingState('Error loading stats');
+      setStatsLoadingState('—');
+      const tsEl = document.getElementById('statsLastUpdated');
+      if (tsEl) tsEl.textContent = 'Load failed — ' + e.message.slice(0, 60);
     }
   }
 
   function setStatsLoadingState(msg) {
-    ['kpi-total','kpi-usdc','kpi-owners','kpi-avglen','kpi-renewals','kpi-transfers'].forEach(id => {
+    const ids = ['kpi-total','kpi-usdc','kpi-owners','kpi-avglen','kpi-renewals','kpi-transfers'];
+    ids.forEach(id => {
       const el = document.getElementById(id);
-      if (el && el.textContent === '—') el.textContent = msg === 'Loading…' ? '…' : '—';
+      if (el) el.textContent = msg;
     });
   }
 
@@ -2709,8 +2735,9 @@
     const grid = document.getElementById('namesGrid');
     if (!grid) { namesFetching = false; return; }
 
-    // Not connected
+    // Not connected — show prompt but DO NOT lock namesFetching
     if (!walletConnected) {
+      namesFetching = false;
       grid.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">🔐</div>
@@ -2723,7 +2750,8 @@
 
     const registry = getRegistry();
     if (!registry) {
-      grid.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h3>Contract not configured</h3><p>Update CONTRACT_ADDRESS in the code.</p></div>`;
+      namesFetching = false;
+      grid.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h3>Wallet not connected</h3><p>Connect your wallet to view your names.</p></div>`;
       return;
     }
 
@@ -2783,7 +2811,8 @@
             ${expiryLabel}
           </div>
           <div class="name-actions">
-            <button class="btn-sm primary" onclick="openProfile('${name}')">Profile</button>
+            <button class="btn-sm primary" onclick="openProfile('${name}')">Edit Profile</button>
+            <a class="btn-sm" href="/profile/${name}.arc" target="_blank" style="text-decoration:none">↗ Public</a>
             ${!isPrimary && !expired ? `<button class="btn-sm" onclick="doSetPrimary('${name}')">Set Primary</button>` : ''}
             <button class="btn-sm" onclick="doRenew('${name}')">Renew</button>
             ${!expired ? `<button class="btn-sm" onclick="openTransferModal('${name}')">Transfer</button>` : ''}
@@ -2836,32 +2865,32 @@
         "event Renewed(address indexed owner, string name, uint256 numYears, uint256 newExpiry, uint256 paid)",
         "event Transferred(address indexed from, address indexed to, string name)",
       ];
-      const actRegistry = new ethers.Contract(CONTRACT_ADDRESS, ACTIVITY_ABI, provider);
+      const actRegistry  = new ethers.Contract(CONTRACT_ADDRESS, ACTIVITY_ABI, provider);
       const currentBlock = await provider.getBlockNumber();
-      const CHUNK = 9999;
-      const MAX_CHUNKS = 5;
+      const CHUNK        = 9999;
+      const addr         = walletAddress;
 
       let allEvents = [];
 
-      for (let c = 0; c < MAX_CHUNKS; c++) {
-        const to   = currentBlock - (c * CHUNK);
-        const from = to - CHUNK + 1;
-        if (from < 0) break;
+      // Scan from deploy block forward so we don't miss old registrations
+      for (let from = REGISTRY_DEPLOY_BLOCK; from <= currentBlock; from += CHUNK) {
+        const to = Math.min(from + CHUNK - 1, currentBlock);
         try {
-          const addr = walletAddress;
           const [reg, ren, trFrom, trTo] = await Promise.all([
-            actRegistry.queryFilter(actRegistry.filters.Registered(addr),  from, to),
-            actRegistry.queryFilter(actRegistry.filters.Renewed(addr),     from, to),
+            actRegistry.queryFilter(actRegistry.filters.Registered(addr),        from, to),
+            actRegistry.queryFilter(actRegistry.filters.Renewed(addr),           from, to),
             actRegistry.queryFilter(actRegistry.filters.Transferred(addr, null), from, to),
             actRegistry.queryFilter(actRegistry.filters.Transferred(null, addr), from, to),
           ]);
           allEvents = allEvents.concat(
-            reg.map(e    => ({ type:'register', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: ethers.utils.formatUnits(e.args.paid,6) })),
-            ren.map(e    => ({ type:'renew',    block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: ethers.utils.formatUnits(e.args.paid,6) })),
-            trFrom.map(e => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'out', to: e.args.to })),
+            reg.map(e    => ({ type:'register', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2) })),
+            ren.map(e    => ({ type:'renew',    block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2) })),
+            trFrom.map(e => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'out', to:   e.args.to   })),
             trTo.map(e   => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'in',  from: e.args.from })),
           );
-        } catch(e) { break; }
+        } catch(e) {
+          console.warn('Activity chunk error', from, '-', to, ':', e.message);
+        }
       }
 
       allEvents.sort((a, b) => b.block - a.block);
@@ -2988,7 +3017,7 @@
   async function doSetPrimary(name) {
     if (!walletConnected) { showWalletModal(); return; }
     const registry = getRegistry(true);
-    if (!registry) { showToast('Contract not deployed yet'); return; }
+    if (!registry) { showWalletModal(); return; }
     try {
       const tx = await registry.setPrimary(name);
       showToast(`Setting ${name}.arc as primary…`);
@@ -3005,7 +3034,7 @@
     if (!walletConnected) { showWalletModal(); return; }
     const registry = getRegistry(true);
     const usdcContract = getUsdc(true);
-    if (!registry) { showToast('Contract not deployed yet'); return; }
+    if (!registry) { showWalletModal(); return; }
 
     const price = getPrice(name);
     const years = 1; // default renew 1 year
@@ -3055,7 +3084,7 @@
     document.getElementById('profileBadges').innerHTML = '';
 
     // Clear text inputs
-    ['pDisplayName','pBio','pWebsite','pTwitter','pEthAddr','pBtcAddr'].forEach(id => {
+    ['pDisplayName','pBio','pTwitter'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
@@ -3131,9 +3160,6 @@
       document.getElementById('profileBadges').innerHTML = badges.join('');
 
       // 2. Text records from ProfileRegistry
-      const profContract = getProfile();
-      if (!profContract) return;
-
       const profReader = new ethers.Contract(PROFILE_ADDRESS, PROFILE_ABI, prov);
       const result = await profReader.getProfile(name).catch(() => null);
       if (!result) return;
@@ -3147,18 +3173,19 @@
       // Populate inputs
       if (textMap['display'])     document.getElementById('pDisplayName').value = textMap['display'];
       if (textMap['bio'])         document.getElementById('pBio').value         = textMap['bio'];
-      if (textMap['url'])         document.getElementById('pWebsite').value     = textMap['url'];
       if (textMap['com.twitter']) document.getElementById('pTwitter').value     = textMap['com.twitter'];
-      if (textMap['addr.eth'])    document.getElementById('pEthAddr').value     = textMap['addr.eth'];
-      if (textMap['addr.btc'])    document.getElementById('pBtcAddr').value     = textMap['addr.btc'];
 
       // Avatar
       if (textMap['avatar']) {
         const url = textMap['avatar'];
         const avatarEl  = document.getElementById('profileAvatar');
         const previewEl = document.getElementById('avatarPreviewLg');
-        avatarEl.innerHTML  = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none'">`;
-        previewEl.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:12px" onerror="this.style.display='none'">`;
+        const fallbackLetter = name[0].toUpperCase();
+        avatarEl.innerHTML  = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}';this.parentElement.style.padding=''">`;
+        avatarEl.style.padding  = '0';
+        avatarEl.style.overflow = 'hidden';
+        previewEl.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}'">`;
+        previewEl.style.overflow = 'hidden';
         document.getElementById('avatarRemoveBtn').style.display = 'inline-flex';
         currentAvatarData = { type: 'url', value: url };
       }
@@ -3193,10 +3220,7 @@
     const fieldMap = {
       displayName: { key: 'display',     id: 'pDisplayName' },
       bio:         { key: 'bio',         id: 'pBio'         },
-      website:     { key: 'url',         id: 'pWebsite'     },
       twitter:     { key: 'com.twitter', id: 'pTwitter'     },
-      ethAddr:     { key: 'addr.eth',    id: 'pEthAddr'     },
-      btcAddr:     { key: 'addr.btc',    id: 'pBtcAddr'     },
       avatar:      { key: 'avatar',      id: null           },
     };
 
@@ -3246,10 +3270,7 @@
     const fieldDefs = [
       { key: 'display',     id: 'pDisplayName' },
       { key: 'bio',         id: 'pBio'         },
-      { key: 'url',         id: 'pWebsite'     },
       { key: 'com.twitter', id: 'pTwitter'     },
-      { key: 'addr.eth',    id: 'pEthAddr'     },
-      { key: 'addr.btc',    id: 'pBtcAddr'     },
     ];
 
     fieldDefs.forEach(f => {
@@ -3501,7 +3522,7 @@
     }
   }
 
-  function onWalletConnected(address, walletName, eip1193) {
+  function onWalletConnected(address, walletName, eip1193, skipAutoLoad = false) {
     const short = address.slice(0, 6) + '…' + address.slice(-4);
 
     // Nav connect button
@@ -3536,7 +3557,10 @@
     closeModal('walletModal');
     showToast(`✓ ${walletName} connected to Arc Testnet`);
 
-    loadMyNames();
+    if (!skipAutoLoad) {
+      // Manual connect: immediately refresh My Names content
+      loadMyNames();
+    }
 
     // Listen for changes
     if (eip1193) {
@@ -3624,15 +3648,20 @@
         if (accounts && accounts.length > 0) {
           provider = new ethers.providers.Web3Provider(eip1193, 'any');
           signer   = provider.getSigner();
+          const address = await signer.getAddress();
           const network = await provider.getNetwork();
-          if (network.chainId === ARC_CHAIN_ID_DEC) {
-            activeEIP1193   = eip1193;
-            walletConnected = true;
-            walletAddress   = accounts[0];
-            const wName = wallets.find(w => w.provider === eip1193)?.info?.name || 'Wallet';
-            onWalletConnected(accounts[0], wName, eip1193);
-            return; // connected, stop
+          activeEIP1193   = eip1193;
+          walletConnected = true;
+          walletAddress   = address;
+          const wName = wallets.find(w => w.provider === eip1193)?.info?.name || 'Wallet';
+          onWalletConnected(address, wName, eip1193, true); // skipAutoLoad — initApp handles page load
+          // Show chain warning if not on Arc Testnet
+          if (network.chainId !== ARC_CHAIN_ID_DEC) {
+            document.getElementById('networkWarning').style.display = 'block';
+            const badge = document.getElementById('chainBadge');
+            if (badge) badge.style.display = 'none';
           }
+          return; // connected, stop
         }
       } catch (e) { /* try next */ }
     }
@@ -3766,16 +3795,20 @@
     const removeBtn = document.getElementById('avatarRemoveBtn');
 
     if (currentAvatarData.type === 'nft') {
-      const inner = `<div style="width:100%;height:100%;background:${currentAvatarData.bg};display:flex;align-items:center;justify-content:center;font-size:28px">${currentAvatarData.value}</div>`;
-      big.innerHTML = inner;
+      big.innerHTML = `<div style="width:100%;height:100%;background:${currentAvatarData.bg};display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:50%">${currentAvatarData.value}</div>`;
       big.style.padding = '0';
+      big.style.overflow = 'hidden';
       preview.innerHTML = `<div style="width:100%;height:100%;background:${currentAvatarData.bg};display:flex;align-items:center;justify-content:center;font-size:26px;border-radius:12px">${currentAvatarData.value}</div>`;
+      preview.style.overflow = 'hidden';
     } else {
-      const inner = `<img src="${currentAvatarData.value}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none'">`;
-      big.innerHTML = inner;
-      preview.innerHTML = `<img src="${currentAvatarData.value}" style="width:100%;height:100%;object-fit:cover;border-radius:12px" onerror="this.style.display='none'">`;
+      const fallbackLetter = (document.getElementById('profileNameBig')?.textContent || 'S')[0].toUpperCase();
+      big.innerHTML = `<img src="${currentAvatarData.value}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}';this.parentElement.style.padding=''">`;
+      big.style.padding = '0';
+      big.style.overflow = 'hidden';
+      preview.innerHTML = `<img src="${currentAvatarData.value}" style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}'">`;
+      preview.style.overflow = 'hidden';
     }
-    removeBtn.style.display = 'inline-flex';
+    if (removeBtn) removeBtn.style.display = 'inline-flex';
   }
 
   function removeAvatar() {
@@ -3806,7 +3839,7 @@
   ];
 
   function getMarket(withSigner = false) {
-    if (!provider || MARKET_ADDRESS === 'BURAYA_MARKET_ADRESINI_YAZ') return null;
+    if (!provider) return null;
     return new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, withSigner ? signer : provider);
   }
 
@@ -3821,10 +3854,10 @@
     "function getProfile(string name) view returns (string[] keys, string[] values)",
   ];
 
-  const PROFILE_KEYS = ['display','bio','url','avatar','com.twitter','addr.eth','addr.btc'];
+  const PROFILE_KEYS = ['display','bio','avatar','com.twitter'];
 
   function getProfile(withSigner = false) {
-    if (!provider || PROFILE_ADDRESS === 'BURAYA_PROFILE_ADRESINI_YAZ') return null;
+    if (!provider) return null;
     return new ethers.Contract(PROFILE_ADDRESS, PROFILE_ABI, withSigner ? signer : provider);
   }
 
@@ -3840,20 +3873,6 @@
     marketFetching = true;
     const grid    = document.getElementById('marketGrid');
     const salesEl = document.getElementById('recentSalesList');
-    const market  = getMarket();
-
-    if (!market) {
-      // Market contract not deployed yet — show placeholder
-      grid.innerHTML = `
-        <div class="empty-state" style="grid-column:1/-1">
-          <div class="empty-icon">🏗️</div>
-          <h3>Marketplace coming soon</h3>
-          <p>Deploy ArcNameMarket.sol and update MARKET_ADDRESS to enable trading.</p>
-        </div>`;
-      document.getElementById('mListingCount').textContent = '0';
-      if (salesEl) salesEl.innerHTML = `<div style="color:var(--muted2);font-size:13px;text-align:center;padding:16px">No sales yet.</div>`;
-      return;
-    }
 
     // Loading state
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon" style="font-size:32px;animation:spin 1s linear infinite;display:inline-block">⟳</div><h3>Loading listings…</h3></div>`;
@@ -3954,7 +3973,7 @@
       return `
         <div class="market-card">
           <div class="market-card-top">
-            <div class="market-name">${item.name}<span>.arc</span></div>
+            <div class="market-name" style="cursor:pointer" onclick="window.open('/profile/${item.name}.arc','_blank')">${item.name}<span>.arc</span></div>
             <span class="market-len-badge">${chars}-char</span>
           </div>
           <div class="market-seller">Seller: ${isOwn ? '<strong style="color:var(--arc)">You</strong>' : sellerShort}</div>
@@ -3981,9 +4000,15 @@
     try {
       const mkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, prov);
       const currentBlock = await prov.getBlockNumber();
-      const from = Math.max(0, currentBlock - 49999);
-      const soldEvents = await mkt.queryFilter(mkt.filters.Sold(), from, currentBlock)
-        .catch(() => []);
+      // Scan from market deploy block forward in chunks
+      let soldEvents = [];
+      for (let from = MARKET_DEPLOY_BLOCK; from <= currentBlock; from += 9999) {
+        const to = Math.min(from + 9998, currentBlock);
+        try {
+          const evts = await mkt.queryFilter(mkt.filters.Sold(), from, to);
+          soldEvents = soldEvents.concat(evts);
+        } catch(e) { /* skip chunk */ }
+      }
       soldEvents.sort((a,b) => b.blockNumber - a.blockNumber);
       cachedSales = soldEvents.slice(0, 10).map(e => ({
         name:  e.args.name,
@@ -4058,7 +4083,7 @@
     const registry = getRegistry(true);
 
     if (!market || !registry) {
-      showToast('⚠ Market contract not deployed yet');
+      showWalletModal();
       closeModal('sellModal');
       return;
     }
@@ -4131,7 +4156,7 @@
 
     const market = getMarket(true);
     const usdcContract = getUsdc(true);
-    if (!market) { showToast('Market contract not deployed'); return; }
+    if (!market) { showWalletModal(); return; }
 
     const buyInner = document.getElementById('buyModalInner');
     buyInner.innerHTML = `
@@ -4142,8 +4167,18 @@
 
     try {
       // Get exact price from contract
-      const listing = await getMarket().getListing(name);
+      const listing  = await getMarket().getListing(name);
       const priceRaw = listing.price;
+
+      // Check USDC balance
+      const balanceBN = await usdcContract.balanceOf(walletAddress);
+      if (balanceBN.lt(priceRaw)) {
+        const needed  = parseFloat(ethers.utils.formatUnits(priceRaw,   6)).toFixed(2);
+        const balance = parseFloat(ethers.utils.formatUnits(balanceBN,  6)).toFixed(2);
+        closeModal('buyModal');
+        showToast(`⚠ Insufficient USDC — need $${needed}, have $${balance}`);
+        return;
+      }
 
       // Step 1: Approve USDC
       const approveTx = await usdcContract.approve(MARKET_ADDRESS, priceRaw);
@@ -4263,24 +4298,23 @@
     });
   })();
 
-  function initApp() {
-    renderStats();          // stats ilk yüklemesi
-    startPolling('stats');  // 60s polling
-    startPolling('search'); // search sonuçları 30s yenile (currentSearch varsa)
-    tryAutoConnect();
+  async function initApp() {
+    // Render static skeletons (no network calls)
+    renderBarChartSkeleton();
+    renderDistChartSkeleton();
 
-    // Trigger load for the initial page if needed
-    if (currentPage === 'stats')   { loadOnChainStats(); startPolling('stats'); }
+    startPolling('search'); // re-check current search result every 30s
+
+    // Always load hero stats and stats KPIs via public RPC (no wallet needed)
+    loadOnChainStats();
+    startPolling('stats');
+
+    // Try to auto-reconnect wallet FIRST, then trigger active page load
+    await tryAutoConnect();
+
+    // Trigger load for the active page (now wallet state is known)
     if (currentPage === 'market')  { renderMarket();     startPolling('market'); }
     if (currentPage === 'mynames') { loadMyNames();      startPolling('mynames'); }
-
-    // Hero stats: public RPC ile hemen yükle
-    (async () => {
-      try {
-        const pubProvider = new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
-        await fetchAndRenderStats(pubProvider);
-      } catch(e) { /* silent */ }
-    })();
   }
 
   waitForEthers(initApp);
