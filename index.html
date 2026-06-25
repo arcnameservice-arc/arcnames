@@ -2831,71 +2831,153 @@
     await fetchAndRenderStats(provider);
   }
 
-  // ── Event scan cache (session-level) ──
-  let _statsCache = null;           // { allReg, allRen, allTr, scannedToBlock }
-  let _statsCacheFetching = false;
+  // ── Persistent event cache (localStorage + session) ──
+  // Cache key prefix — versioned so stale caches auto-invalidate
+  const CACHE_VERSION = 'v1';
+  const CACHE_KEY     = `arcnames_${CACHE_VERSION}_events`;
+
+  function loadCacheFromStorage() {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch(e) { return null; }
+  }
+
+  function saveCacheToStorage(cache) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+    } catch(e) { /* quota exceeded — ignore */ }
+  }
+
+  // In-memory copy for the session (avoid re-parsing JSON)
+  let _memCache = null;
+
+  function getCache() {
+    if (_memCache) return _memCache;
+    _memCache = loadCacheFromStorage();
+    return _memCache;
+  }
+
+  function setCache(cache) {
+    _memCache = cache;
+    saveCacheToStorage(cache);
+  }
+
+  // Scan only the missing range, append to existing cache
+  async function scanNewBlocks(prov, registry, fromBlock, toBlock) {
+    const CHUNK = 9999;
+    const BATCH = 8; // parallel chunks per round
+    const ranges = [];
+    for (let f = fromBlock; f <= toBlock; f += CHUNK) {
+      ranges.push({ from: f, to: Math.min(f + CHUNK - 1, toBlock) });
+    }
+
+    let newReg = [], newRen = [], newTr = [];
+    for (let i = 0; i < ranges.length; i += BATCH) {
+      const batch = ranges.slice(i, i + BATCH);
+      const results = await Promise.allSettled(batch.map(({ from, to }) =>
+        Promise.all([
+          registry.queryFilter(registry.filters.Registered(),  from, to),
+          registry.queryFilter(registry.filters.Renewed(),     from, to),
+          registry.queryFilter(registry.filters.Transferred(), from, to),
+        ])
+      ));
+      results.forEach(r => {
+        if (r.status !== 'fulfilled') return;
+        const [reg, ren, tr] = r.value;
+        newReg = newReg.concat(reg.map(e => ({
+          block: e.blockNumber, name: e.args.name,
+          owner: e.args.owner, paid: e.args.paid.toString(),
+        })));
+        newRen = newRen.concat(ren.map(e => ({
+          block: e.blockNumber, name: e.args.name,
+          owner: e.args.owner, paid: e.args.paid.toString(),
+        })));
+        newTr = newTr.concat(tr.map(e => ({
+          block: e.blockNumber, name: e.args.name || '',
+          to: e.args.to || '',
+        })));
+      });
+    }
+    return { newReg, newRen, newTr };
+  }
 
   async function fetchAndRenderStats(prov) {
     setStatsLoadingState('…');
     try {
       const currentBlock = await prov.getBlockNumber();
+      const registry = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, prov);
 
-      // Use cache if we already scanned and block hasn't moved much (< 300 blocks ≈ 10 min)
-      if (_statsCache && (currentBlock - _statsCache.scannedToBlock) < 300) {
-        renderStatsFromData(_statsCache.allReg, _statsCache.allRen, _statsCache.allTr, currentBlock);
+      // Load existing cache
+      let cache = getCache();
+
+      // If cache is fresh enough (< 150 blocks ≈ 5 min), skip scan entirely
+      if (cache && (currentBlock - cache.scannedToBlock) < 150) {
+        renderStatsFromCache(cache, currentBlock);
         return;
       }
 
-      const registry  = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, prov);
-      const CHUNK     = 9999;
-      const START     = REGISTRY_DEPLOY_BLOCK;
+      const scanFrom = cache ? cache.scannedToBlock + 1 : REGISTRY_DEPLOY_BLOCK;
+      const scanTo   = currentBlock;
 
-      // Build all chunk ranges up front
-      const ranges = [];
-      for (let from = START; from <= currentBlock; from += CHUNK) {
-        ranges.push({ from, to: Math.min(from + CHUNK - 1, currentBlock) });
+      // If there's nothing new to scan (already up to date)
+      if (scanFrom > scanTo) {
+        if (cache) { renderStatsFromCache(cache, currentBlock); return; }
       }
 
-      // Run all chunks in parallel batches of 6 (avoid overwhelming RPC)
-      const BATCH = 6;
-      let allReg = [], allRen = [], allTr = [];
+      const { newReg, newRen, newTr } = await scanNewBlocks(prov, registry, scanFrom, scanTo);
 
-      for (let i = 0; i < ranges.length; i += BATCH) {
-        const batch = ranges.slice(i, i + BATCH);
-        const results = await Promise.allSettled(batch.map(({ from, to }) =>
-          Promise.all([
-            registry.queryFilter(registry.filters.Registered(),  from, to),
-            registry.queryFilter(registry.filters.Renewed(),     from, to),
-            registry.queryFilter(registry.filters.Transferred(), from, to),
-          ])
-        ));
-        results.forEach(r => {
-          if (r.status === 'fulfilled') {
-            const [reg, ren, tr] = r.value;
-            allReg = allReg.concat(reg);
-            allRen = allRen.concat(ren);
-            allTr  = allTr.concat(tr);
-          }
-        });
-      }
-
-      // Cache results
-      _statsCache = { allReg, allRen, allTr, scannedToBlock: currentBlock };
-
-      renderStatsFromData(allReg, allRen, allTr, currentBlock);
+      // Merge with existing cache
+      const merged = {
+        scannedToBlock: currentBlock,
+        reg: (cache ? cache.reg : []).concat(newReg),
+        ren: (cache ? cache.ren : []).concat(newRen),
+        tr:  (cache ? cache.tr  : []).concat(newTr),
+      };
+      setCache(merged);
+      renderStatsFromCache(merged, currentBlock);
 
     } catch(e) {
       console.error('fetchAndRenderStats:', e);
-      setStatsLoadingState('Error');
+      setStatsLoadingState('Error: ' + e.message.slice(0, 40));
     }
   }
 
-  function renderStatsFromData(allReg, allRen, allTr, currentBlock) {
+  function renderStatsFromCache(cache, currentBlock) {
+    // Convert cached plain objects back to the shape renderStatsFromData expects
+    const fmt = (paidStr) => parseFloat(ethers.utils.formatUnits(ethers.BigNumber.from(paidStr), 6));
+
+    const allReg = cache.reg.map(e => ({
+      blockNumber: e.block,
+      args: { name: e.name, owner: e.owner,
+              paid: { _isBigNumber: true, toString: () => e.paid } },
+    }));
+    const allRen = cache.ren.map(e => ({
+      blockNumber: e.block,
+      args: { name: e.name, owner: e.owner,
+              paid: { _isBigNumber: true, toString: () => e.paid } },
+    }));
+    const allTr = cache.tr.map(e => ({
+      blockNumber: e.block,
+      args: { name: e.name, to: e.to },
+    }));
+
+    // Pre-compute USDC from stored strings to avoid BigNumber issues
+    const totalUSDC = cache.reg.reduce((s, e) => s + fmt(e.paid), 0)
+                    + cache.ren.reduce((s, e) => s + fmt(e.paid), 0);
+
+    renderStatsFromData(allReg, allRen, allTr, currentBlock, totalUSDC);
+  }
+
+  function renderStatsFromData(allReg, allRen, allTr, currentBlock, precomputedUSDC) {
 
       // ── KPI calculations ──
-      const totalReg     = allReg.length;
-      const totalUSDC    = allReg.reduce((s, e) => s + parseFloat(ethers.utils.formatUnits(e.args.paid, 6)), 0)
-                         + allRen.reduce((s, e) => s + parseFloat(ethers.utils.formatUnits(e.args.paid, 6)), 0);
+      const totalReg  = allReg.length;
+      const totalUSDC = precomputedUSDC !== undefined
+        ? precomputedUSDC
+        : allReg.reduce((s, e) => s + parseFloat(ethers.utils.formatUnits(e.args.paid, 6)), 0)
+        + allRen.reduce((s, e) => s + parseFloat(ethers.utils.formatUnits(e.args.paid, 6)), 0);
       const uniqueOwners = new Set(allReg.map(e => e.args.owner.toLowerCase())).size;
       const avgLen = totalReg > 0
         ? (allReg.reduce((s, e) => s + e.args.name.length, 0) / totalReg).toFixed(1)
@@ -2979,19 +3061,29 @@
       if (!actEl) return;
       actEl.innerHTML = '';
 
-      // Transferred event: `name` is a non-indexed string in data, `to` is indexed topic[2]
+      // Safe USDC formatter — handles both BigNumber (live) and string (cache)
+      const safeFmt = (paid) => {
+        try {
+          if (!paid) return '0.00';
+          const bn = (paid._isBigNumber || paid._hex)
+            ? paid
+            : ethers.BigNumber.from(paid.toString());
+          return parseFloat(ethers.utils.formatUnits(bn, 6)).toFixed(2);
+        } catch(e) { return '?'; }
+      };
+
       const allEvents = [
         ...allReg.map(e => ({
           type:   'register',
           block:  e.blockNumber,
           name:   e.args.name,
-          detail: `Registered by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2)} USDC`,
+          detail: `Registered by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${safeFmt(e.args.paid)} USDC`,
         })),
         ...allRen.map(e => ({
           type:   'renew',
           block:  e.blockNumber,
           name:   e.args.name,
-          detail: `Renewed by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2)} USDC`,
+          detail: `Renewed by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${safeFmt(e.args.paid)} USDC`,
         })),
         ...allTr.map(e => ({
           type:   'transfer',
@@ -3178,38 +3270,44 @@
       ];
       const actRegistry  = new ethers.Contract(CONTRACT_ADDRESS, ACTIVITY_ABI, provider);
       const currentBlock = await provider.getBlockNumber();
-      const CHUNK        = 9999;
-      const BATCH        = 6;
-      const addr         = walletAddress;
+      const CHUNK = 9999, BATCH = 8;
+      const addr  = walletAddress;
 
-      let allEvents = [];
+      // ── Incremental cache per wallet address ──
+      const myCacheKey = `arcnames_${CACHE_VERSION}_addr_${addr.toLowerCase()}`;
+      let myCache = null;
+      try { myCache = JSON.parse(localStorage.getItem(myCacheKey) || 'null'); } catch(e) {}
 
-      // Build ranges and scan in parallel batches
-      const ranges = [];
-      for (let from = REGISTRY_DEPLOY_BLOCK; from <= currentBlock; from += CHUNK) {
-        ranges.push({ from, to: Math.min(from + CHUNK - 1, currentBlock) });
-      }
+      let allEvents = myCache ? [...myCache.events] : [];
+      const scanFrom = myCache ? myCache.scannedToBlock + 1 : REGISTRY_DEPLOY_BLOCK;
 
-      for (let i = 0; i < ranges.length; i += BATCH) {
-        const batch = ranges.slice(i, i + BATCH);
-        const results = await Promise.allSettled(batch.map(({ from, to }) =>
-          Promise.all([
-            actRegistry.queryFilter(actRegistry.filters.Registered(addr),        from, to),
-            actRegistry.queryFilter(actRegistry.filters.Renewed(addr),           from, to),
-            actRegistry.queryFilter(actRegistry.filters.Transferred(addr, null), from, to),
-            actRegistry.queryFilter(actRegistry.filters.Transferred(null, addr), from, to),
-          ])
-        ));
-        results.forEach(r => {
-          if (r.status !== 'fulfilled') return;
-          const [reg, ren, trFrom, trTo] = r.value;
-          allEvents = allEvents.concat(
-            reg.map(e    => ({ type:'register', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2) })),
-            ren.map(e    => ({ type:'renew',    block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2) })),
-            trFrom.map(e => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'out', to:   e.args.to   })),
-            trTo.map(e   => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'in',  from: e.args.from })),
-          );
-        });
+      if (scanFrom <= currentBlock) {
+        const ranges = [];
+        for (let f = scanFrom; f <= currentBlock; f += CHUNK) ranges.push({ from: f, to: Math.min(f+CHUNK-1, currentBlock) });
+
+        for (let i = 0; i < ranges.length; i += BATCH) {
+          const results = await Promise.allSettled(ranges.slice(i, i+BATCH).map(({from, to}) =>
+            Promise.all([
+              actRegistry.queryFilter(actRegistry.filters.Registered(addr),        from, to),
+              actRegistry.queryFilter(actRegistry.filters.Renewed(addr),           from, to),
+              actRegistry.queryFilter(actRegistry.filters.Transferred(addr, null), from, to),
+              actRegistry.queryFilter(actRegistry.filters.Transferred(null, addr), from, to),
+            ])
+          ));
+          results.forEach(r => {
+            if (r.status !== 'fulfilled') return;
+            const [reg, ren, trFrom, trTo] = r.value;
+            allEvents = allEvents.concat(
+              reg.map(e    => ({ type:'register', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2) })),
+              ren.map(e    => ({ type:'renew',    block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2) })),
+              trFrom.map(e => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'out', to:   e.args.to   })),
+              trTo.map(e   => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'in',  from: e.args.from })),
+            );
+          });
+        }
+
+        // Save updated cache
+        try { localStorage.setItem(myCacheKey, JSON.stringify({ scannedToBlock: currentBlock, events: allEvents })); } catch(e) {}
       }
 
       allEvents.sort((a, b) => b.block - a.block);
@@ -3494,19 +3592,31 @@
       if (textMap['bio'])         document.getElementById('pBio').value         = textMap['bio'];
       if (textMap['com.twitter']) document.getElementById('pTwitter').value     = textMap['com.twitter'];
 
-      // Avatar
+      // Avatar — handles both URL and "nft:emoji:color" format
       if (textMap['avatar']) {
-        const url = textMap['avatar'];
+        const raw = textMap['avatar'];
         const avatarEl  = document.getElementById('profileAvatar');
         const previewEl = document.getElementById('avatarPreviewLg');
         const fallbackLetter = name[0].toUpperCase();
-        avatarEl.innerHTML  = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}';this.parentElement.style.padding=''">`;
         avatarEl.style.padding  = '0';
         avatarEl.style.overflow = 'hidden';
-        previewEl.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}'">`;
         previewEl.style.overflow = 'hidden';
+
+        if (raw.startsWith('nft:')) {
+          // Format: "nft:emoji:color"
+          const parts = raw.split(':');
+          const emoji = parts[1] || '🖼';
+          const bg    = parts[2] || '#0D9488';
+          avatarEl.innerHTML  = `<div style="width:100%;height:100%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:50%">${emoji}</div>`;
+          previewEl.innerHTML = `<div style="width:100%;height:100%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:26px;border-radius:12px">${emoji}</div>`;
+          currentAvatarData = { type: 'nft', value: raw, bg, emoji };
+        } else {
+          // URL avatar
+          avatarEl.innerHTML  = `<img src="${raw}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}';this.parentElement.style.padding=''">`;
+          previewEl.innerHTML = `<img src="${raw}" style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}'">`;
+          currentAvatarData = { type: 'url', value: raw };
+        }
         document.getElementById('avatarRemoveBtn').style.display = 'inline-flex';
-        currentAvatarData = { type: 'url', value: url };
       }
 
     } catch(e) {
@@ -4077,7 +4187,9 @@
 
   function confirmAvatar() {
     if (!selectedNft) return;
-    currentAvatarData = { type: 'nft', value: selectedNft.emoji, bg: selectedNft.color, label: selectedNft.name };
+    // Store as "nft:emoji:color" so profile page can reconstruct the visual
+    const nftValue = `nft:${selectedNft.emoji}:${selectedNft.color}`;
+    currentAvatarData = { type: 'nft', value: nftValue, bg: selectedNft.color, emoji: selectedNft.emoji, label: selectedNft.name };
     applyAvatarToUI();
     closeModal('avatarModal');
     showToast(`Avatar set to ${selectedNft.name} — click "Save to chain" to save ✓`);
@@ -4109,21 +4221,23 @@
 
   function applyAvatarToUI() {
     if (!currentAvatarData) return;
-    const big = document.getElementById('profileAvatar');
-    const preview = document.getElementById('avatarPreviewLg');
+    const big       = document.getElementById('profileAvatar');
+    const preview   = document.getElementById('avatarPreviewLg');
     const removeBtn = document.getElementById('avatarRemoveBtn');
+    const fallbackLetter = (document.getElementById('profileNameBig')?.textContent || 'S')[0].toUpperCase();
 
     if (currentAvatarData.type === 'nft') {
-      big.innerHTML = `<div style="width:100%;height:100%;background:${currentAvatarData.bg};display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:50%">${currentAvatarData.value}</div>`;
-      big.style.padding = '0';
-      big.style.overflow = 'hidden';
-      preview.innerHTML = `<div style="width:100%;height:100%;background:${currentAvatarData.bg};display:flex;align-items:center;justify-content:center;font-size:26px;border-radius:12px">${currentAvatarData.value}</div>`;
+      // emoji and bg stored separately on the object (not parsed from value string)
+      const emoji = currentAvatarData.emoji || '🖼';
+      const bg    = currentAvatarData.bg    || '#0D9488';
+      big.innerHTML = `<div style="width:100%;height:100%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:50%">${emoji}</div>`;
+      big.style.padding = '0'; big.style.overflow = 'hidden';
+      preview.innerHTML = `<div style="width:100%;height:100%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:26px;border-radius:12px">${emoji}</div>`;
       preview.style.overflow = 'hidden';
     } else {
-      const fallbackLetter = (document.getElementById('profileNameBig')?.textContent || 'S')[0].toUpperCase();
+      // URL avatar
       big.innerHTML = `<img src="${currentAvatarData.value}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}';this.parentElement.style.padding=''">`;
-      big.style.padding = '0';
-      big.style.overflow = 'hidden';
+      big.style.padding = '0'; big.style.overflow = 'hidden';
       preview.innerHTML = `<img src="${currentAvatarData.value}" style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:block" onerror="this.parentElement.innerHTML='${fallbackLetter}'">`;
       preview.style.overflow = 'hidden';
     }
@@ -4697,46 +4811,54 @@
       ];
       const actReg = new ethers.Contract(CONTRACT_ADDRESS, ACTIVITY_ABI_PUB, prov);
       const actMkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI_PUB, prov);
-      const CHUNK = 9999;
-      const BATCH = 6;
-      let events = [];
 
-      // Build ranges for registry events — parallel batch scan
-      const regRanges = [];
-      for (let from = REGISTRY_DEPLOY_BLOCK; from <= curBlock; from += CHUNK) {
-        regRanges.push({ from, to: Math.min(from + CHUNK - 1, curBlock) });
-      }
-      for (let i = 0; i < regRanges.length; i += BATCH) {
-        const batch = regRanges.slice(i, i + BATCH);
-        const results = await Promise.allSettled(batch.map(({ from, to }) =>
-          Promise.all([
-            actReg.queryFilter(actReg.filters.Registered(ownerAddr), from, to),
-            actReg.queryFilter(actReg.filters.Renewed(ownerAddr),    from, to),
-          ])
-        ));
-        results.forEach(r => {
-          if (r.status !== 'fulfilled') return;
-          const [reg2, ren] = r.value;
-          reg2.forEach(e => events.push({ type:'register', name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.paid,6)) }));
-          ren.forEach(e  => events.push({ type:'renew',    name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.paid,6)) }));
-        });
+      // ── Per-address incremental cache ──
+      const addrCacheKey = `arcnames_${CACHE_VERSION}_addr_${ownerAddr.toLowerCase()}`;
+      let addrCache = null;
+      try { addrCache = JSON.parse(localStorage.getItem(addrCacheKey) || 'null'); } catch(e) {}
+
+      const CHUNK = 9999, BATCH = 8;
+      let events = addrCache ? [...addrCache.events] : [];
+
+      const regFrom = addrCache ? addrCache.scannedToBlock + 1 : REGISTRY_DEPLOY_BLOCK;
+      const mktFrom = addrCache ? Math.max(addrCache.scannedToBlock + 1, MARKET_DEPLOY_BLOCK) : MARKET_DEPLOY_BLOCK;
+
+      // Only scan new blocks
+      if (regFrom <= curBlock) {
+        const regRanges = [];
+        for (let f = regFrom; f <= curBlock; f += CHUNK) regRanges.push({ from: f, to: Math.min(f+CHUNK-1, curBlock) });
+        for (let i = 0; i < regRanges.length; i += BATCH) {
+          const results = await Promise.allSettled(regRanges.slice(i, i+BATCH).map(({from, to}) =>
+            Promise.all([
+              actReg.queryFilter(actReg.filters.Registered(ownerAddr), from, to),
+              actReg.queryFilter(actReg.filters.Renewed(ownerAddr),    from, to),
+            ])
+          ));
+          results.forEach(r => {
+            if (r.status !== 'fulfilled') return;
+            const [reg2, ren] = r.value;
+            reg2.forEach(e => events.push({ type:'register', name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.paid,6)) }));
+            ren.forEach(e  => events.push({ type:'renew',    name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.paid,6)) }));
+          });
+        }
       }
 
-      // Market events — parallel batch scan
-      const mktRanges = [];
-      for (let from = MARKET_DEPLOY_BLOCK; from <= curBlock; from += CHUNK) {
-        mktRanges.push({ from, to: Math.min(from + CHUNK - 1, curBlock) });
+      if (mktFrom <= curBlock) {
+        const mktRanges = [];
+        for (let f = mktFrom; f <= curBlock; f += CHUNK) mktRanges.push({ from: f, to: Math.min(f+CHUNK-1, curBlock) });
+        for (let i = 0; i < mktRanges.length; i += BATCH) {
+          const results = await Promise.allSettled(mktRanges.slice(i, i+BATCH).map(({from, to}) =>
+            actMkt.queryFilter(actMkt.filters.Listed(ownerAddr), from, to)
+          ));
+          results.forEach(r => {
+            if (r.status !== 'fulfilled') return;
+            r.value.forEach(e => events.push({ type:'list', name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.price,6)) }));
+          });
+        }
       }
-      for (let i = 0; i < mktRanges.length; i += BATCH) {
-        const batch = mktRanges.slice(i, i + BATCH);
-        const results = await Promise.allSettled(batch.map(({ from, to }) =>
-          actMkt.queryFilter(actMkt.filters.Listed(ownerAddr), from, to)
-        ));
-        results.forEach(r => {
-          if (r.status !== 'fulfilled') return;
-          r.value.forEach(e => events.push({ type:'list', name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.price,6)) }));
-        });
-      }
+
+      // Save updated cache
+      try { localStorage.setItem(addrCacheKey, JSON.stringify({ scannedToBlock: curBlock, events })); } catch(e) {}
 
       events.sort((a,b) => b.block - a.block);
 
@@ -4751,12 +4873,21 @@
       const displayName = tm['display'] || (name.charAt(0).toUpperCase()+name.slice(1));
       const bio = tm['bio'] || '';
       const twitter = tm['com.twitter'] || '';
-      const avatarUrl = tm['avatar'] || '';
+      const avatarRaw = tm['avatar'] || '';
       const letter = name[0].toUpperCase();
 
-      const avatarHtml = avatarUrl
-        ? `<img src="${avatarUrl}" alt="${displayName}" onerror="this.parentElement.innerHTML='${letter}'">`
-        : letter;
+      // Parse avatar — URL or "nft:emoji:color"
+      let avatarHtml;
+      if (!avatarRaw) {
+        avatarHtml = letter;
+      } else if (avatarRaw.startsWith('nft:')) {
+        const parts = avatarRaw.split(':');
+        const emoji = parts[1] || '🖼';
+        const bg    = parts[2] || '#0D9488';
+        avatarHtml = `<div style="width:100%;height:100%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:50%">${emoji}</div>`;
+      } else {
+        avatarHtml = `<img src="${avatarRaw}" alt="${displayName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" onerror="this.parentElement.innerHTML='${letter}'">`;
+      }
 
       const twitterHtml = twitter
         ? (() => { const h = twitter.startsWith('@') ? twitter : '@'+twitter;
