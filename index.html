@@ -1662,6 +1662,12 @@
         Stats
       </a>
     </li>
+    <li>
+      <a onclick="openMyProfile()" id="nav-profile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Profile
+      </a>
+    </li>
   </ul>
   <div class="nav-right">
     <div class="chain-badge" id="chainBadge" style="display:none">
@@ -1693,6 +1699,10 @@
   <button class="mobile-nav-btn" id="mnav-stats" onclick="showPage('stats')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
     <span>Stats</span>
+  </button>
+  <button class="mobile-nav-btn" id="mnav-profile" onclick="openMyProfile()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+    <span>Profile</span>
   </button>
   <button class="mobile-nav-connect" id="mobileConnectBtn" onclick="showWalletModal()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
@@ -2352,7 +2362,10 @@
     if (id === 'mynames') { loadMyNames();      startPolling('mynames'); }
     if (id === 'search')  {                     startPolling('search'); }
     // profile: name passed via profileNameArg global, set before calling showPage
-    if (id === 'profile') { loadPublicProfile(window._profileTarget || ''); }
+    if (id === 'profile') {
+      const target = window._profileTarget || (walletConnected ? walletAddress : '');
+      loadPublicProfile(target);
+    }
   }
 
   // ── Tabs (My Names) ──
@@ -4530,6 +4543,33 @@
   }
 
   // ── Public Profile Page ──
+  async function openMyProfile() {
+    if (!walletConnected) {
+      // Not connected — go to profile page with empty state asking to connect
+      window._profileTarget = '';
+      showPage('profile');
+      return;
+    }
+    // Try to get primary name first, fallback to first name owned
+    try {
+      const prov = provider || new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const reg  = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, prov);
+      let targetName = await reg.getPrimaryName(walletAddress).catch(() => '');
+      if (!targetName) {
+        const names = await reg.getNamesOf(walletAddress).catch(() => []);
+        targetName = names[0] || '';
+      }
+      if (targetName) {
+        window._profileTarget = targetName;
+      } else {
+        window._profileTarget = '';
+      }
+    } catch(e) {
+      window._profileTarget = '';
+    }
+    showPage('profile');
+  }
+
   function goToProfile(name) {
     // Strip .arc suffix, lowercase
     const clean = name.replace(/\.arc$/i, '').toLowerCase().trim();
@@ -4558,9 +4598,10 @@
     if (!wrap) return;
     if (!name) {
       wrap.innerHTML = `<div class="pub-state">
-        <div class="pub-state-icon">⚠️</div>
-        <div class="pub-state-title">No name specified</div>
-        <div class="pub-state-sub">Use /profile/yourname.arc to view a profile.</div>
+        <div class="pub-state-icon">🔐</div>
+        <div class="pub-state-title">Connect your wallet</div>
+        <div class="pub-state-sub">Connect MetaMask to view your public profile.<br>Or use /profile/yourname.arc to view any profile.</div>
+        <button class="btn-register" style="width:auto;padding:10px 24px;margin-top:20px" onclick="showWalletModal()">Connect Wallet</button>
       </div>`;
       return;
     }
