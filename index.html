@@ -1905,7 +1905,6 @@
 
     <div class="tab-bar">
       <button class="tab-btn active" id="tab-names" onclick="switchTab('names')">My Names</button>
-      <button class="tab-btn" id="tab-activity" onclick="switchTab('activity')">Activity</button>
       <button class="tab-btn" id="tab-watching" onclick="switchTab('watching')">
         Watching <span id="watchCount" style="background:var(--arc-dim);color:var(--arc);border-radius:20px;padding:1px 7px;font-size:11px;margin-left:4px">0</span>
       </button>
@@ -1920,20 +1919,6 @@
           <h3>Connect your wallet</h3>
           <p>Connect MetaMask to view your registered .arc names.</p>
           <button class="btn-register" style="width:auto;padding:10px 24px;margin-top:16px" onclick="showWalletModal()">Connect Wallet</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab: Activity -->
-    <div id="tab-content-activity" style="display:none">
-      <div class="activity-section" style="padding:0">
-        <div class="timeline" id="activityTimeline">
-          <!-- Filled by loadMyActivity() -->
-          <div class="empty-state" id="activityLoadingState">
-            <div class="empty-icon" style="font-size:32px;opacity:0.4">⏳</div>
-            <h3>Connect your wallet</h3>
-            <p>Connect MetaMask to view your transaction history.</p>
-          </div>
         </div>
       </div>
     </div>
@@ -2357,7 +2342,14 @@
   let walletAddress   = '';
   let selectedYears   = 1;
   let currentSearch   = '';
-  let watchlist       = [];
+  // Watchlist — persisted in localStorage
+  let watchlist = (function() {
+    try { return JSON.parse(localStorage.getItem('arcnames_watchlist') || '[]'); }
+    catch(e) { return []; }
+  })();
+  function saveWatchlist() {
+    try { localStorage.setItem('arcnames_watchlist', JSON.stringify(watchlist)); } catch(e) {}
+  }
   let bulkCart        = [];
   let bulkCartOpen    = false;
 
@@ -2470,12 +2462,11 @@
 
   // ── Tabs (My Names) ──
   function switchTab(tab) {
-    ['names','activity','watching'].forEach(t => {
+    ['names','watching'].forEach(t => {
       document.getElementById('tab-content-' + t).style.display = t === tab ? 'block' : 'none';
       document.getElementById('tab-' + t).classList.toggle('active', t === tab);
     });
-    if (tab === 'watching')  renderWatchlist();
-    if (tab === 'activity')  loadMyActivity();
+    if (tab === 'watching') renderWatchlist();
   }
 
   // ── Search ──
@@ -2673,9 +2664,11 @@
     const idx = watchlist.indexOf(currentSearch);
     if (idx === -1) {
       watchlist.push(currentSearch);
+      saveWatchlist();
       showToast(`${currentSearch}.arc added to watchlist ⭐`);
     } else {
       watchlist.splice(idx, 1);
+      saveWatchlist();
       showToast(`${currentSearch}.arc removed from watchlist`);
     }
     updateStarBtn();
@@ -2729,6 +2722,7 @@
 
   function removeFromWatch(name) {
     watchlist = watchlist.filter(n => n !== name);
+    saveWatchlist();
     updateWatchCount();
     renderWatchlist();
     showToast(`${name}.arc removed from watchlist`);
@@ -5182,6 +5176,8 @@
   async function initApp() {
     // Render static skeletons (no network calls)
     renderBarChartSkeleton();
+    // Restore watchlist count badge from localStorage
+    updateWatchCount();
     renderDistChartSkeleton();
 
     startPolling('search'); // re-check current search result every 30s
