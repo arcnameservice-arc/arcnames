@@ -1385,18 +1385,24 @@
     /* no bottom nav — minimal bottom padding */
     .page { padding-bottom: 20px; }
 
-    /* stats row: mobile'da 2 stat */
-    .desktop-stat { display: none; }
-    .desktop-only { display: none; }
-    .stats-row { gap: 24px; }
+    /* stats row: mobile'da 2x2 grid */
+    .desktop-stat { display: block; }  /* tüm 4 stat göster */
+    .desktop-only { display: none; }   /* sub label gizli kalır */
+    .hero-owners-sub-wrap { display: none; } /* usdc altındaki owners sub gizli */
+    .stats-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 0;
+      margin-top: 40px;
+      justify-items: center;
+    }
+    .stat-num { font-size: 26px; }
 
     /* hero */
     .hero { padding: 32px 16px 28px; }
     .hero h1 { font-size: clamp(28px, 8vw, 44px); letter-spacing: -1px; }
     .hero p { font-size: 15px; margin-bottom: 32px; }
     .hero-badge { font-size: 11px; padding: 5px 12px; margin-bottom: 20px; }
-    .stats-row { gap: 16px; margin-top: 40px; flex-wrap: wrap; justify-content: center; }
-    .stat-num { font-size: 22px; }
 
     /* search */
     .search-wrap { max-width: 100%; }
@@ -1846,7 +1852,7 @@
       <div class="stat">
         <div class="stat-num" id="hero-usdc">—</div>
         <div class="stat-label">USDC collected</div>
-        <div class="stat-sub" id="hero-owners-sub">— unique owners</div>
+        <div class="stat-sub" id="hero-owners-sub" style="display:none">— unique owners</div>
       </div>
       <!-- Desktop-only stats -->
       <div class="stat desktop-stat">
