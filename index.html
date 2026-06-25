@@ -4784,11 +4784,24 @@
         </p>`;
       await listTx.wait();
 
+      // Optimistically add new listing to cache so it shows instantly
+      const reg2 = getRegistry();
+      const recData = reg2 ? await reg2.getRecord(name).catch(() => null) : null;
+      cachedListings.unshift({
+        name,
+        seller:   walletAddress,
+        price:    price,
+        priceRaw: priceRaw,
+        listedAt: Math.floor(Date.now() / 1000),
+        expiry:   recData ? recData.expiry.toNumber() : 0,
+      });
+      marketFilteredList = [...cachedListings];
+
       modalInner.innerHTML = `
         <div class="tx-success-icon">✓</div>
         <h3>${name}.arc listed!</h3>
         <p style="margin-bottom:20px">Listed for $${price} USDC on the marketplace.</p>
-        <button class="btn-register" onclick="closeModal('txModal');showPage('market')">View Market</button>`;
+        <button class="btn-register" onclick="closeModal('txModal');marketFetching=false;showPage('market');renderMarket()">View Market</button>`;
 
     } catch(e) {
       const msg = e.code === 4001 || e.code === 'ACTION_REJECTED' ? 'Rejected' : (e.reason || e.message);
@@ -4883,6 +4896,9 @@
     try {
       const tx = await market.cancel(name);
       await tx.wait();
+      // Clear cache so market reloads fresh
+      cachedListings = [];
+      marketFetching = false;
       modalInner.innerHTML = `
         <div class="tx-success-icon">✓</div>
         <h3>Listing cancelled</h3>
