@@ -127,6 +127,9 @@
     height: 44px;
     gap: 4px;
     overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     -ms-overflow-style: none;
     border-top: 1px solid var(--border);
@@ -448,6 +451,11 @@
   .stat-label {
     font-size: 12px; color: var(--muted);
     margin-top: 4px; letter-spacing: 0.5px; text-transform: uppercase;
+  }
+
+  .stat-sub {
+    font-size: 12px; color: var(--arc);
+    margin-top: 3px; font-family: 'Space Mono', monospace;
   }
 
   /* ── Bulk Cart ── */
@@ -1352,8 +1360,8 @@
     /* nav row 1: kompakt */
     .nav-row1 { padding: 0 16px; height: 52px; }
     /* nav row 2: scrollable tab bar */
-    .nav-row2 { padding: 0 8px; height: 38px; gap: 2px; }
-    .nav-tab { padding: 5px 11px; font-size: 13px; }
+    .nav-row2 { padding: 0 8px 0 8px; height: 38px; gap: 1px; }
+    .nav-tab { padding: 5px 10px; font-size: 12px; border-radius: 16px; }
     .nav-tab .nav-icon { display: none; }
     /* connect pill kompakt */
     .btn-connect { padding: 7px 13px; font-size: 12px; }
@@ -1798,10 +1806,16 @@
     </div>
 
     <div class="stats-row">
-      <div class="stat"><div class="stat-num" id="hero-total">—</div><div class="stat-label">Names registered</div></div>
-      <div class="stat"><div class="stat-num" id="hero-usdc">—</div><div class="stat-label">USDC collected</div></div>
-      <div class="stat"><div class="stat-num" id="hero-owners">—</div><div class="stat-label">Unique owners</div></div>
-      <div class="stat"><div class="stat-num">$2</div><div class="stat-label">Starting price</div></div>
+      <div class="stat">
+        <div class="stat-num" id="hero-total">—</div>
+        <div class="stat-label">Names registered</div>
+        <div class="stat-sub">$2 starting price</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" id="hero-usdc">—</div>
+        <div class="stat-label">USDC collected</div>
+        <div class="stat-sub" id="hero-owners-sub">— unique owners</div>
+      </div>
     </div>
 
     <!-- Pricing -->
@@ -3054,12 +3068,12 @@
       document.getElementById('kpi-avglen').textContent    = avgLen;
 
       // ── Update hero stats row ──
-      const heroTotal  = document.getElementById('hero-total');
-      const heroUsdc   = document.getElementById('hero-usdc');
-      const heroOwners = document.getElementById('hero-owners');
-      if (heroTotal)  heroTotal.textContent  = totalReg.toLocaleString();
-      if (heroUsdc)   heroUsdc.textContent   = '$' + totalUSDC.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
-      if (heroOwners) heroOwners.textContent = uniqueOwners.toLocaleString();
+      const heroTotal     = document.getElementById('hero-total');
+      const heroUsdc      = document.getElementById('hero-usdc');
+      const heroOwnersSub = document.getElementById('hero-owners-sub');
+      if (heroTotal)     heroTotal.textContent     = totalReg.toLocaleString();
+      if (heroUsdc)      heroUsdc.textContent      = '$' + totalUSDC.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
+      if (heroOwnersSub) heroOwnersSub.textContent = uniqueOwners.toLocaleString() + ' unique owners';
 
       // ── Delta badge ──
       const deltaEl = document.getElementById('kpi-total-delta');
