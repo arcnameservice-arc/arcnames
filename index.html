@@ -1298,11 +1298,40 @@
 
   .mobile-nav-connect svg { width: 20px; height: 20px; stroke-width: 2; }
 
+  /* Mobile wallet badge — top nav, only on mobile */
+  .mobile-wallet-badge {
+    display: none; /* shown via media query */
+    align-items: center; gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border2);
+    border-radius: 20px;
+    background: var(--bg3);
+    color: var(--muted2);
+    font-size: 12px; font-weight: 600;
+    font-family: 'Space Mono', monospace;
+    cursor: pointer;
+    transition: all .2s;
+    white-space: nowrap;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-wallet-badge:hover { border-color: var(--arc); color: var(--arc); }
+
+  .mobile-wallet-badge.connected {
+    border-color: var(--success);
+    color: var(--success);
+    background: rgba(16,185,129,0.08);
+  }
+
   @media (max-width: 640px) {
-    /* nav top: hide links, keep logo + theme toggle */
+    /* nav top: hide links, show logo + mobile wallet badge */
     nav { padding: 0 16px; height: 56px; }
     nav ul { display: none; }
     #connectBtn { display: none; }
+    #chainBadge { display: none !important; }
+    .mobile-wallet-badge { display: flex !important; }
     .mobile-nav { display: flex; }
 
     /* push page content above bottom nav */
@@ -1330,9 +1359,9 @@
     /* my names */
     .mynames-section { padding: 28px 16px; }
     .section-h2 { font-size: 24px; }
-    .name-card { padding: 16px; }
+    .name-card { padding: 16px; flex-direction: column; align-items: flex-start; }
+    .name-actions { width: 100%; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
     .name-text { font-size: 15px; }
-    .name-actions { gap: 6px; }
     .btn-sm { padding: 6px 10px; font-size: 11px; }
     .tab-bar { width: 100%; }
     .tab-btn { flex: 1; text-align: center; padding: 7px 8px; font-size: 12px; }
@@ -1377,6 +1406,9 @@
     .modal { border-radius: 20px 20px 0 0; width: 100%; max-width: 100%; }
     .avatar-modal { border-radius: 20px 20px 0 0; width: 100%; max-width: 100%; }
     .profile-modal { border-radius: 20px 20px 0 0; }
+
+    /* public profile */
+    .pub-hero { flex-direction: column; gap: 16px; align-items: flex-start; }
   }
 
   @media (max-width: 400px) {
@@ -1708,6 +1740,11 @@
       <span>Arc Testnet</span>
     </div>
     <button class="theme-toggle" id="themeToggle" title="Toggle theme" style="display:none">☀️</button>
+    <!-- Mobile wallet badge (only visible on mobile, replaces connectBtn) -->
+    <button class="mobile-wallet-badge" id="mobileWalletBadge" onclick="showWalletModal()" style="display:none">
+      <div class="chain-dot" style="width:6px;height:6px;flex-shrink:0"></div>
+      <span id="mobileWalletAddr">Connect</span>
+    </button>
     <button class="btn-connect" id="connectBtn" onclick="showWalletModal()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
       Connect Wallet
@@ -1738,8 +1775,12 @@
     <span>Profile</span>
   </button>
   <button class="mobile-nav-connect" id="mobileConnectBtn" onclick="showWalletModal()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
-    <span>Wallet</span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <rect x="2" y="7" width="20" height="14" rx="2"/>
+      <path d="M16 14a1 1 0 1 0 2 0 1 1 0 0 0-2 0z" fill="currentColor" stroke="none"/>
+      <path d="M22 11V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4"/>
+    </svg>
+    <span id="mobileNavWalletLabel">Wallet</span>
   </button>
 </nav>
 
@@ -2864,7 +2905,32 @@
     await fetchAndRenderStats(provider);
   }
 
-  // ── Persistent event cache (localStorage + session) ──
+  // ── Block time measurement (dynamic) ──
+  // Cached measured block time in seconds. Default 1s until measured.
+  let _measuredBlockTime = 1.0;
+  let _blockTimeMeasured = false;
+
+  async function measureBlockTime(prov) {
+    if (_blockTimeMeasured) return _measuredBlockTime;
+    try {
+      const latest = await prov.getBlock('latest');
+      const older  = await prov.getBlock(latest.number - 100);
+      if (latest && older && latest.number !== older.number) {
+        const elapsed = latest.timestamp - older.timestamp;
+        const blocks  = latest.number - older.number;
+        _measuredBlockTime = elapsed / blocks;
+        _blockTimeMeasured = true;
+        console.log(`Arc block time: ${_measuredBlockTime.toFixed(3)}s/block`);
+      }
+    } catch(e) {
+      console.warn('Block time measurement failed, using 1s default');
+    }
+    return _measuredBlockTime;
+  }
+
+  function blocksToSecs(blocksAgo) {
+    return Math.floor(blocksAgo * _measuredBlockTime);
+  }
   // Cache key prefix — versioned so stale caches auto-invalidate
   const CACHE_VERSION = 'v1';
   const CACHE_KEY     = `arcnames_${CACHE_VERSION}_events`;
@@ -2940,6 +3006,8 @@
     setStatsLoadingState('…');
     try {
       const currentBlock = await prov.getBlockNumber();
+      // Measure block time once per session
+      await measureBlockTime(prov);
       const registry = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, prov);
 
       // Load existing cache
@@ -3040,8 +3108,8 @@
       }
 
       // ── Daily bar chart (last 10 days) ──
-      // Arc testnet: ~2 s/block → 1 day ≈ 43 200 blocks
-      const BLOCKS_PER_DAY = 43200;
+      // Arc testnet: ~1 s/block → 1 day ≈ 86 400 blocks (dynamically measured)
+      const BLOCKS_PER_DAY = Math.round(86400 / _measuredBlockTime);
       const dayMap = {};
       const now = Date.now();
       for (let d = 9; d >= 0; d--) {
@@ -3050,7 +3118,7 @@
       }
       allReg.forEach(e => {
         const blocksAgo = currentBlock - e.blockNumber;
-        const secsAgo   = blocksAgo * 2;
+        const secsAgo   = blocksToSecs(blocksAgo);
         const eventDate = new Date(Date.now() - secsAgo * 1000);
         const key       = eventDate.toLocaleDateString('en-US', { weekday:'short' });
         if (key in dayMap) dayMap[key]++;
@@ -3132,7 +3200,7 @@
       } else {
         allEvents.forEach(a => {
           const blocksAgo = currentBlock - a.block;
-          const secsAgo   = blocksAgo * 2;
+          const secsAgo   = blocksToSecs(blocksAgo);
           const timeStr   = secsAgo < 60    ? `${secsAgo}s ago`
                           : secsAgo < 3600  ? `${Math.floor(secsAgo / 60)}m ago`
                           : secsAgo < 86400 ? `${Math.floor(secsAgo / 3600)}h ago`
@@ -3303,6 +3371,7 @@
       ];
       const actRegistry  = new ethers.Contract(CONTRACT_ADDRESS, ACTIVITY_ABI, provider);
       const currentBlock = await provider.getBlockNumber();
+      await measureBlockTime(provider);
       const CHUNK = 9999, BATCH = 8;
       const addr  = walletAddress;
 
@@ -3365,7 +3434,7 @@
       allEvents.forEach(ev => {
         const cfg        = typeConfig[ev.type];
         const blocksAgo  = currentBlock - ev.block;
-        const secsAgo    = blocksAgo * 2;
+        const secsAgo    = blocksToSecs(blocksAgo);
         const date       = new Date(Date.now() - secsAgo * 1000);
         const timeStr    = secsAgo < 60    ? `${secsAgo}s ago`
                          : secsAgo < 3600  ? `${Math.floor(secsAgo/60)}m ago`
@@ -3987,7 +4056,7 @@
   function onWalletConnected(address, walletName, eip1193, skipAutoLoad = false) {
     const short = address.slice(0, 6) + '…' + address.slice(-4);
 
-    // Nav connect button
+    // Nav connect button (desktop)
     const btn = document.getElementById('connectBtn');
     if (btn) {
       btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>${short}`;
@@ -3996,14 +4065,22 @@
       btn.style.color        = 'var(--success)';
     }
 
-    // Chain badge
+    // Chain badge (desktop)
     const badge = document.getElementById('chainBadge');
     if (badge) badge.style.display = 'flex';
 
-    // Mobile connect button
+    // Mobile top nav wallet badge
+    const mwb = document.getElementById('mobileWalletBadge');
+    if (mwb) {
+      document.getElementById('mobileWalletAddr').textContent = short;
+      mwb.classList.add('connected');
+    }
+
+    // Mobile bottom nav wallet button
     const mb = document.getElementById('mobileConnectBtn');
     if (mb) {
-      mb.querySelector('span').textContent = short;
+      const lbl = mb.querySelector('#mobileNavWalletLabel');
+      if (lbl) lbl.textContent = short;
       mb.style.borderColor  = 'var(--success)';
       mb.style.color        = 'var(--success)';
       mb.style.background   = 'rgba(16,185,129,0.1)';
@@ -4020,11 +4097,9 @@
     showToast(`✓ ${walletName} connected to Arc Testnet`);
 
     if (!skipAutoLoad) {
-      // Manual connect: immediately refresh My Names content
       loadMyNames();
     }
 
-    // Listen for changes
     if (eip1193) {
       eip1193.on?.('accountsChanged', onAccountsChanged);
       eip1193.on?.('chainChanged',    onChainChanged);
@@ -4039,6 +4114,10 @@
       const short   = walletAddress.slice(0, 6) + '…' + walletAddress.slice(-4);
       const btn = document.getElementById('connectBtn');
       if (btn) btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>${short}`;
+      const mwb2 = document.getElementById('mobileWalletBadge');
+      if (mwb2) document.getElementById('mobileWalletAddr').textContent = short;
+      const mb2 = document.getElementById('mobileConnectBtn');
+      if (mb2) { const lbl = mb2.querySelector('#mobileNavWalletLabel'); if(lbl) lbl.textContent = short; }
       document.getElementById('connectedAddr').textContent = walletAddress;
     }
   }
@@ -4074,9 +4153,18 @@
     const badge = document.getElementById('chainBadge');
     if (badge) badge.style.display = 'none';
 
+    // Mobile top nav badge reset
+    const mwb = document.getElementById('mobileWalletBadge');
+    if (mwb) {
+      document.getElementById('mobileWalletAddr').textContent = 'Connect';
+      mwb.classList.remove('connected');
+    }
+
+    // Mobile bottom nav wallet button reset
     const mb = document.getElementById('mobileConnectBtn');
     if (mb) {
-      mb.querySelector('span').textContent = 'Wallet';
+      const lbl = mb.querySelector('#mobileNavWalletLabel');
+      if (lbl) lbl.textContent = 'Wallet';
       mb.style.borderColor = '';
       mb.style.color       = '';
       mb.style.background  = '';
@@ -4498,7 +4586,7 @@
       const currentBlk = currentBlock;
       salesEl.innerHTML = cachedSales.map(s => {
         const blocksAgo = currentBlk - s.block;
-        const t = timeAgo(Math.floor(Date.now()/1000) - blocksAgo * 2);
+        const t = timeAgo(Math.floor(Date.now()/1000) - blocksToSecs(blocksAgo));
         return `
           <div class="sale-row" onclick="window.open('https://testnet.arcscan.app/tx/${s.txHash}','_blank')" style="cursor:pointer">
             <div class="sale-name">${s.name}<span>.arc</span></div>
@@ -4772,7 +4860,7 @@
   }
 
   function pubRelTime(blockNum, curBlock) {
-    const secsAgo = (curBlock - blockNum) * 2;
+    const secsAgo = blocksToSecs(curBlock - blockNum);
     if (secsAgo < 60)    return `${secsAgo}s ago`;
     if (secsAgo < 3600)  return `${Math.floor(secsAgo/60)}m ago`;
     if (secsAgo < 86400) return `${Math.floor(secsAgo/3600)}h ago`;
@@ -4899,7 +4987,7 @@
       const totalUsdc = events.filter(e => e.type==='register'||e.type==='renew').reduce((s,e)=>s+e.paid,0);
       const firstReg  = events.filter(e=>e.type==='register').sort((a,b)=>a.block-b.block)[0];
       const firstRegStr = firstReg
-        ? new Date(Date.now()-(curBlock-firstReg.block)*2000).toLocaleDateString('en-US',{month:'short',year:'numeric'})
+        ? new Date(Date.now() - blocksToSecs(curBlock - firstReg.block) * 1000).toLocaleDateString('en-US',{month:'short',year:'numeric'})
         : pubFmtExpiry(rec.registeredAt.toNumber());
 
       // 6. Render
