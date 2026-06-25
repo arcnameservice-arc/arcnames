@@ -2831,34 +2831,66 @@
     await fetchAndRenderStats(provider);
   }
 
+  // ── Event scan cache (session-level) ──
+  let _statsCache = null;           // { allReg, allRen, allTr, scannedToBlock }
+  let _statsCacheFetching = false;
+
   async function fetchAndRenderStats(prov) {
     setStatsLoadingState('…');
     try {
-      const registry     = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, prov);
       const currentBlock = await prov.getBlockNumber();
 
-      // Scan from deploy block forward in 9999-block chunks.
-      // Arc testnet has a 10 000-block getLogs limit per request.
-      const CHUNK        = 9999;
-      const START_BLOCK  = REGISTRY_DEPLOY_BLOCK;  // 46 774 056
+      // Use cache if we already scanned and block hasn't moved much (< 300 blocks ≈ 10 min)
+      if (_statsCache && (currentBlock - _statsCache.scannedToBlock) < 300) {
+        renderStatsFromData(_statsCache.allReg, _statsCache.allRen, _statsCache.allTr, currentBlock);
+        return;
+      }
+
+      const registry  = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, prov);
+      const CHUNK     = 9999;
+      const START     = REGISTRY_DEPLOY_BLOCK;
+
+      // Build all chunk ranges up front
+      const ranges = [];
+      for (let from = START; from <= currentBlock; from += CHUNK) {
+        ranges.push({ from, to: Math.min(from + CHUNK - 1, currentBlock) });
+      }
+
+      // Run all chunks in parallel batches of 6 (avoid overwhelming RPC)
+      const BATCH = 6;
       let allReg = [], allRen = [], allTr = [];
 
-      for (let from = START_BLOCK; from <= currentBlock; from += CHUNK) {
-        const to = Math.min(from + CHUNK - 1, currentBlock);
-        try {
-          const [reg, ren, tr] = await Promise.all([
-            registry.queryFilter(registry.filters.Registered(), from, to),
-            registry.queryFilter(registry.filters.Renewed(),    from, to),
+      for (let i = 0; i < ranges.length; i += BATCH) {
+        const batch = ranges.slice(i, i + BATCH);
+        const results = await Promise.allSettled(batch.map(({ from, to }) =>
+          Promise.all([
+            registry.queryFilter(registry.filters.Registered(),  from, to),
+            registry.queryFilter(registry.filters.Renewed(),     from, to),
             registry.queryFilter(registry.filters.Transferred(), from, to),
-          ]);
-          allReg = allReg.concat(reg);
-          allRen = allRen.concat(ren);
-          allTr  = allTr.concat(tr);
-        } catch(e) {
-          console.warn('Stats chunk error', from, '-', to, ':', e.message);
-          // continue with next chunk — don't abort the whole scan
-        }
+          ])
+        ));
+        results.forEach(r => {
+          if (r.status === 'fulfilled') {
+            const [reg, ren, tr] = r.value;
+            allReg = allReg.concat(reg);
+            allRen = allRen.concat(ren);
+            allTr  = allTr.concat(tr);
+          }
+        });
       }
+
+      // Cache results
+      _statsCache = { allReg, allRen, allTr, scannedToBlock: currentBlock };
+
+      renderStatsFromData(allReg, allRen, allTr, currentBlock);
+
+    } catch(e) {
+      console.error('fetchAndRenderStats:', e);
+      setStatsLoadingState('Error');
+    }
+  }
+
+  function renderStatsFromData(allReg, allRen, allTr, currentBlock) {
 
       // ── KPI calculations ──
       const totalReg     = allReg.length;
@@ -2996,13 +3028,7 @@
       const tsEl = document.getElementById('statsLastUpdated');
       if (tsEl) tsEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
 
-    } catch(e) {
-      console.error('fetchAndRenderStats error:', e);
-      setStatsLoadingState('—');
-      const tsEl = document.getElementById('statsLastUpdated');
-      if (tsEl) tsEl.textContent = 'Load failed — ' + e.message.slice(0, 60);
-    }
-  }
+  } // end renderStatsFromData
 
   function setStatsLoadingState(msg) {
     const ids = ['kpi-total','kpi-usdc','kpi-owners','kpi-avglen','kpi-renewals','kpi-transfers'];
@@ -3153,29 +3179,37 @@
       const actRegistry  = new ethers.Contract(CONTRACT_ADDRESS, ACTIVITY_ABI, provider);
       const currentBlock = await provider.getBlockNumber();
       const CHUNK        = 9999;
+      const BATCH        = 6;
       const addr         = walletAddress;
 
       let allEvents = [];
 
-      // Scan from deploy block forward so we don't miss old registrations
+      // Build ranges and scan in parallel batches
+      const ranges = [];
       for (let from = REGISTRY_DEPLOY_BLOCK; from <= currentBlock; from += CHUNK) {
-        const to = Math.min(from + CHUNK - 1, currentBlock);
-        try {
-          const [reg, ren, trFrom, trTo] = await Promise.all([
+        ranges.push({ from, to: Math.min(from + CHUNK - 1, currentBlock) });
+      }
+
+      for (let i = 0; i < ranges.length; i += BATCH) {
+        const batch = ranges.slice(i, i + BATCH);
+        const results = await Promise.allSettled(batch.map(({ from, to }) =>
+          Promise.all([
             actRegistry.queryFilter(actRegistry.filters.Registered(addr),        from, to),
             actRegistry.queryFilter(actRegistry.filters.Renewed(addr),           from, to),
             actRegistry.queryFilter(actRegistry.filters.Transferred(addr, null), from, to),
             actRegistry.queryFilter(actRegistry.filters.Transferred(null, addr), from, to),
-          ]);
+          ])
+        ));
+        results.forEach(r => {
+          if (r.status !== 'fulfilled') return;
+          const [reg, ren, trFrom, trTo] = r.value;
           allEvents = allEvents.concat(
             reg.map(e    => ({ type:'register', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2) })),
             ren.map(e    => ({ type:'renew',    block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, numYears: e.args.numYears.toNumber(), paid: parseFloat(ethers.utils.formatUnits(e.args.paid, 6)).toFixed(2) })),
             trFrom.map(e => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'out', to:   e.args.to   })),
             trTo.map(e   => ({ type:'transfer', block: e.blockNumber, txHash: e.transactionHash, name: e.args.name, direction:'in',  from: e.args.from })),
           );
-        } catch(e) {
-          console.warn('Activity chunk error', from, '-', to, ':', e.message);
-        }
+        });
       }
 
       allEvents.sort((a, b) => b.block - a.block);
@@ -4285,14 +4319,19 @@
     try {
       const mkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, prov);
       const currentBlock = await prov.getBlockNumber();
-      // Scan from market deploy block forward in chunks
+      // Build ranges and scan in parallel batches of 6
+      const CHUNK = 9999; const BATCH = 6;
+      const mktRanges = [];
+      for (let from = MARKET_DEPLOY_BLOCK; from <= currentBlock; from += CHUNK) {
+        mktRanges.push({ from, to: Math.min(from + CHUNK - 1, currentBlock) });
+      }
       let soldEvents = [];
-      for (let from = MARKET_DEPLOY_BLOCK; from <= currentBlock; from += 9999) {
-        const to = Math.min(from + 9998, currentBlock);
-        try {
-          const evts = await mkt.queryFilter(mkt.filters.Sold(), from, to);
-          soldEvents = soldEvents.concat(evts);
-        } catch(e) { /* skip chunk */ }
+      for (let i = 0; i < mktRanges.length; i += BATCH) {
+        const batch = mktRanges.slice(i, i + BATCH);
+        const results = await Promise.allSettled(batch.map(({ from, to }) =>
+          mkt.queryFilter(mkt.filters.Sold(), from, to)
+        ));
+        results.forEach(r => { if (r.status === 'fulfilled') soldEvents = soldEvents.concat(r.value); });
       }
       soldEvents.sort((a,b) => b.blockNumber - a.blockNumber);
       cachedSales = soldEvents.slice(0, 10).map(e => ({
@@ -4659,26 +4698,46 @@
       const actReg = new ethers.Contract(CONTRACT_ADDRESS, ACTIVITY_ABI_PUB, prov);
       const actMkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI_PUB, prov);
       const CHUNK = 9999;
+      const BATCH = 6;
       let events = [];
 
+      // Build ranges for registry events — parallel batch scan
+      const regRanges = [];
       for (let from = REGISTRY_DEPLOY_BLOCK; from <= curBlock; from += CHUNK) {
-        const to = Math.min(from + CHUNK - 1, curBlock);
-        try {
-          const [reg2, ren] = await Promise.all([
+        regRanges.push({ from, to: Math.min(from + CHUNK - 1, curBlock) });
+      }
+      for (let i = 0; i < regRanges.length; i += BATCH) {
+        const batch = regRanges.slice(i, i + BATCH);
+        const results = await Promise.allSettled(batch.map(({ from, to }) =>
+          Promise.all([
             actReg.queryFilter(actReg.filters.Registered(ownerAddr), from, to),
             actReg.queryFilter(actReg.filters.Renewed(ownerAddr),    from, to),
-          ]);
+          ])
+        ));
+        results.forEach(r => {
+          if (r.status !== 'fulfilled') return;
+          const [reg2, ren] = r.value;
           reg2.forEach(e => events.push({ type:'register', name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.paid,6)) }));
           ren.forEach(e  => events.push({ type:'renew',    name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.paid,6)) }));
-        } catch(e) { /* skip */ }
+        });
       }
+
+      // Market events — parallel batch scan
+      const mktRanges = [];
       for (let from = MARKET_DEPLOY_BLOCK; from <= curBlock; from += CHUNK) {
-        const to = Math.min(from + CHUNK - 1, curBlock);
-        try {
-          const listed = await actMkt.queryFilter(actMkt.filters.Listed(ownerAddr), from, to);
-          listed.forEach(e => events.push({ type:'list', name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.price,6)) }));
-        } catch(e) { /* skip */ }
+        mktRanges.push({ from, to: Math.min(from + CHUNK - 1, curBlock) });
       }
+      for (let i = 0; i < mktRanges.length; i += BATCH) {
+        const batch = mktRanges.slice(i, i + BATCH);
+        const results = await Promise.allSettled(batch.map(({ from, to }) =>
+          actMkt.queryFilter(actMkt.filters.Listed(ownerAddr), from, to)
+        ));
+        results.forEach(r => {
+          if (r.status !== 'fulfilled') return;
+          r.value.forEach(e => events.push({ type:'list', name:e.args.name, block:e.blockNumber, paid:parseFloat(ethers.utils.formatUnits(e.args.price,6)) }));
+        });
+      }
+
       events.sort((a,b) => b.block - a.block);
 
       // 5. Metrics
