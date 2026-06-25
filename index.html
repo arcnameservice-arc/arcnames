@@ -99,19 +99,39 @@
   }
 
   /* ── Nav ── */
-  nav {
+  nav.topnav {
     position: sticky;
     top: 0;
     z-index: 100;
+    display: flex;
+    flex-direction: column;
+    background: var(--nav-bg);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Row 1: logo + connect */
+  .nav-row1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 40px;
     height: 64px;
-    background: var(--nav-bg);
-    backdrop-filter: blur(20px);
-    border-bottom: 1px solid var(--border);
   }
+
+  /* Row 2: tab menu */
+  .nav-row2 {
+    display: flex;
+    align-items: center;
+    padding: 0 32px;
+    height: 44px;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    border-top: 1px solid var(--border);
+  }
+  .nav-row2::-webkit-scrollbar { display: none; }
 
   .logo {
     display: flex;
@@ -123,6 +143,7 @@
     text-decoration: none;
     color: var(--text);
     cursor: pointer;
+    flex-shrink: 0;
   }
 
   .logo-icon {
@@ -140,61 +161,71 @@
     line-height: 1;
   }
 
-  .logo-arc {
-    font-weight: 700;
-    color: var(--text);
-    font-size: 17px;
-  }
+  .logo-arc  { font-weight: 700; color: var(--text); font-size: 17px; }
+  .logo-names { font-weight: 300; color: var(--muted2); font-size: 17px; }
+  .logo span { color: var(--arc); }
 
-  .logo-names {
-    font-weight: 300;
-    color: var(--muted2);
-    font-size: 17px;
-    letter-spacing: 0;
-  }
-
-  .logo span { color: var(--arc); } /* kept for fallback */
-
-  nav ul { list-style: none; display: flex; gap: 4px; }
-
-  nav a {
+  /* Tab nav links */
+  nav .nav-tab {
     text-decoration: none;
     color: var(--muted2);
-    font-size: 13px;
-    padding: 6px 12px;
-    border-radius: 8px;
-    transition: all .2s;
+    font-size: 14px;
+    padding: 6px 16px;
+    border-radius: 20px;
+    transition: all .18s;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     font-weight: 500;
-  }
-
-  .nav-icon {
-    width: 15px;
-    height: 15px;
+    white-space: nowrap;
     flex-shrink: 0;
-    opacity: 0.7;
-    transition: opacity .2s;
+    border: none;
+    background: none;
+    font-family: 'Space Grotesk', sans-serif;
   }
 
-  nav a:hover .nav-icon,
-  nav a.active .nav-icon { opacity: 1; }
+  .nav-tab .nav-icon { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.7; transition: opacity .18s; }
+  .nav-tab:hover .nav-icon, .nav-tab.active .nav-icon { opacity: 1; }
 
-  nav a:hover, nav a.active {
+  .nav-tab:hover {
     color: var(--text);
     background: var(--bg3);
   }
 
-  nav a.active {
+  .nav-tab.active {
     color: var(--arc);
     background: var(--arc-dim);
+    font-weight: 600;
   }
 
-  nav a.active .nav-icon { stroke: var(--arc); }
+  .nav-tab.active .nav-icon { stroke: var(--arc); }
 
-  .nav-right { display: flex; align-items: center; gap: 10px; }
+  /* Connect Wallet pill */
+  .btn-connect {
+    padding: 10px 22px;
+    background: var(--arc);
+    border: none;
+    color: #fff;
+    border-radius: 24px;
+    font-size: 14px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .btn-connect:hover { background: var(--arc2); transform: scale(1.02); }
+  .btn-connect.connected {
+    background: rgba(16,185,129,0.12);
+    color: var(--success);
+    border: 1.5px solid var(--success);
+    padding: 9px 18px;
+  }
+  .btn-connect.connected:hover { background: rgba(16,185,129,0.2); }
 
   .chain-badge {
     display: flex; align-items: center; gap: 6px;
@@ -202,6 +233,13 @@
     border: 1px solid var(--border2);
     font-size: 12px; color: var(--muted2);
     font-family: 'Space Mono', monospace;
+  }
+
+  .nav-right { display: flex; align-items: center; gap: 10px; }
+
+  .theme-toggle { display: none; }
+
+  .mobile-wallet-badge { display: none; }
   }
 
   .chain-dot {
@@ -217,21 +255,6 @@
 
   /* ── Theme Toggle — hidden ── */
   .theme-toggle { display: none; }
-
-  .btn-connect {
-    padding: 8px 18px;
-    background: var(--arc-dim);
-    border: 1px solid var(--arc);
-    color: var(--arc);
-    border-radius: 10px;
-    font-size: 13px;
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all .2s;
-  }
-
-  .btn-connect:hover { background: var(--arc); color: #fff; }
 
   /* ── Pages ── */
   .page { display: none; position: relative; z-index: 1; }
@@ -1326,16 +1349,17 @@
   }
 
   @media (max-width: 640px) {
-    /* nav top: hide links, show logo + mobile wallet badge */
-    nav { padding: 0 16px; height: 56px; }
-    nav ul { display: none; }
-    #connectBtn { display: none; }
-    #chainBadge { display: none !important; }
-    .mobile-wallet-badge { display: flex !important; }
-    .mobile-nav { display: flex; }
-
-    /* push page content above bottom nav */
-    .page { padding-bottom: 72px; }
+    /* nav row 1: kompakt */
+    .nav-row1 { padding: 0 16px; height: 52px; }
+    /* nav row 2: scrollable tab bar */
+    .nav-row2 { padding: 0 8px; height: 38px; gap: 2px; }
+    .nav-tab { padding: 5px 11px; font-size: 13px; }
+    .nav-tab .nav-icon { display: none; }
+    /* connect pill kompakt */
+    .btn-connect { padding: 7px 13px; font-size: 12px; }
+    .btn-connect svg { display: none; }
+    /* no bottom nav — minimal bottom padding */
+    .page { padding-bottom: 20px; }
 
     /* hero */
     .hero { padding: 32px 16px 28px; }
@@ -1397,8 +1421,8 @@
     .nft-grid { grid-template-columns: repeat(3, 1fr); }
 
     /* bulk cart */
-    .bulk-cart { right: 8px; bottom: 76px; min-width: calc(100vw - 16px); max-width: calc(100vw - 16px); }
-    .bulk-fab { bottom: 76px; right: 12px; }
+    .bulk-cart { right: 8px; bottom: 24px; min-width: calc(100vw - 16px); max-width: calc(100vw - 16px); }
+    .bulk-fab { bottom: 24px; right: 12px; }
 
     /* modals */
     .modal { width: 92vw; padding: 24px 20px; }
@@ -1680,108 +1704,58 @@
 <body>
 
 <!-- Nav -->
-<nav>
-  <div class="logo" onclick="showPage('search')">
-    <div class="logo-icon">
-      <!-- Arc compass icon: outer circle + diagonal line + two dots -->
-      <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <!-- Outer circle -->
-        <circle cx="17" cy="17" r="13.5" stroke="#0D9488" stroke-width="1.5" opacity="0.35"/>
-        <!-- Inner circle (small) -->
-        <circle cx="17" cy="17" r="8" stroke="#0D9488" stroke-width="1.2" opacity="0.2"/>
-        <!-- Diagonal line from bottom-left to top-right area -->
-        <line x1="10" y1="22" x2="21" y2="11" stroke="#0D9488" stroke-width="1.5" stroke-linecap="round"/>
-        <!-- Dot at end (top-right) -->
-        <circle cx="21.5" cy="10.5" r="2.2" fill="#0D9488"/>
-        <!-- Small dot at start (bottom-left area) -->
-        <circle cx="10.5" cy="22" r="1.4" fill="#0D9488" opacity="0.6"/>
-      </svg>
+<nav class="topnav" id="topnav">
+  <!-- Row 1: Logo + Connect Wallet -->
+  <div class="nav-row1">
+    <div class="logo" onclick="showPage('search')">
+      <div class="logo-icon">
+        <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="17" cy="17" r="13.5" stroke="#0D9488" stroke-width="1.5" opacity="0.35"/>
+          <circle cx="17" cy="17" r="8" stroke="#0D9488" stroke-width="1.2" opacity="0.2"/>
+          <line x1="10" y1="22" x2="21" y2="11" stroke="#0D9488" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="21.5" cy="10.5" r="2.2" fill="#0D9488"/>
+          <circle cx="10.5" cy="22" r="1.4" fill="#0D9488" opacity="0.6"/>
+        </svg>
+      </div>
+      <div class="logo-wordmark">
+        <span class="logo-arc">Arc</span>
+        <span class="logo-names">Names</span>
+      </div>
     </div>
-    <div class="logo-wordmark">
-      <span class="logo-arc">Arc</span>
-      <span class="logo-names">Names</span>
+    <div class="nav-right">
+      <div class="chain-badge" id="chainBadge" style="display:none">
+        <div class="chain-dot"></div>
+        <span>Arc Testnet</span>
+      </div>
+      <button class="btn-connect" id="connectBtn" onclick="showWalletModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;flex-shrink:0"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 14a1 1 0 1 0 2 0 1 1 0 0 0-2 0z" fill="currentColor" stroke="none"/><path d="M22 11V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4"/></svg>
+        Connect Wallet
+      </button>
     </div>
   </div>
-  <ul>
-    <li>
-      <a onclick="showPage('search')" class="active" id="nav-search">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        Search
-      </a>
-    </li>
-    <li>
-      <a onclick="showPage('mynames')" id="nav-mynames">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12h8M8 8h5M8 16h6"/></svg>
-        My Names
-      </a>
-    </li>
-    <li>
-      <a onclick="showPage('market')" id="nav-market">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-        Market
-      </a>
-    </li>
-    <li>
-      <a onclick="showPage('stats')" id="nav-stats">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        Stats
-      </a>
-    </li>
-    <li>
-      <a onclick="openMyProfile()" id="nav-profile">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-        Profile
-      </a>
-    </li>
-  </ul>
-  <div class="nav-right">
-    <div class="chain-badge" id="chainBadge" style="display:none">
-      <div class="chain-dot"></div>
-      <span>Arc Testnet</span>
-    </div>
-    <button class="theme-toggle" id="themeToggle" title="Toggle theme" style="display:none">☀️</button>
-    <!-- Mobile wallet badge (only visible on mobile, replaces connectBtn) -->
-    <button class="mobile-wallet-badge" id="mobileWalletBadge" onclick="showWalletModal()" style="display:none">
-      <div class="chain-dot" style="width:6px;height:6px;flex-shrink:0"></div>
-      <span id="mobileWalletAddr">Connect</span>
+  <!-- Row 2: Tab navigation -->
+  <div class="nav-row2" id="navRow2">
+    <button class="nav-tab active" id="nav-search" onclick="showPage('search')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      Search
     </button>
-    <button class="btn-connect" id="connectBtn" onclick="showWalletModal()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-      Connect Wallet
+    <button class="nav-tab" id="nav-mynames" onclick="showPage('mynames')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12h8M8 8h5M8 16h6"/></svg>
+      My Names
+    </button>
+    <button class="nav-tab" id="nav-market" onclick="showPage('market')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+      Market
+    </button>
+    <button class="nav-tab" id="nav-stats" onclick="showPage('stats')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Stats
+    </button>
+    <button class="nav-tab" id="nav-profile" onclick="openMyProfile()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="nav-icon"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      Profile
     </button>
   </div>
-</nav>
-
-<!-- Mobile Bottom Nav -->
-<nav class="mobile-nav" id="mobileNav">
-  <button class="mobile-nav-btn active" id="mnav-search" onclick="showPage('search')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <span>Search</span>
-  </button>
-  <button class="mobile-nav-btn" id="mnav-mynames" onclick="showPage('mynames')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12h8M8 8h5M8 16h6"/></svg>
-    <span>My Names</span>
-  </button>
-  <button class="mobile-nav-btn" id="mnav-market" onclick="showPage('market')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
-    <span>Market</span>
-  </button>
-  <button class="mobile-nav-btn" id="mnav-stats" onclick="showPage('stats')">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-    <span>Stats</span>
-  </button>
-  <button class="mobile-nav-btn" id="mnav-profile" onclick="openMyProfile()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-    <span>Profile</span>
-  </button>
-  <button class="mobile-nav-connect" id="mobileConnectBtn" onclick="showWalletModal()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <rect x="2" y="7" width="20" height="14" rx="2"/>
-      <path d="M16 14a1 1 0 1 0 2 0 1 1 0 0 0-2 0z" fill="currentColor" stroke="none"/>
-      <path d="M22 11V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4"/>
-    </svg>
-    <span id="mobileNavWalletLabel">Wallet</span>
-  </button>
 </nav>
 
 <!-- Page: Search -->
@@ -2414,13 +2388,10 @@
     }
 
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+    document.querySelectorAll('.nav-tab').forEach(a => a.classList.remove('active'));
     document.getElementById('page-' + id).classList.add('active');
     const navLink = document.getElementById('nav-' + id);
     if (navLink) navLink.classList.add('active');
-    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
-    const mb = document.getElementById('mnav-' + id);
-    if (mb) mb.classList.add('active');
 
     // Immediate load + start polling
     if (id === 'stats')   { renderBarChartSkeleton(); renderDistChartSkeleton(); loadOnChainStats(); startPolling('stats'); }
@@ -4059,22 +4030,8 @@
     const badge = document.getElementById('chainBadge');
     if (badge) badge.style.display = 'flex';
 
-    // Mobile top nav wallet badge
-    const mwb = document.getElementById('mobileWalletBadge');
-    if (mwb) {
-      document.getElementById('mobileWalletAddr').textContent = short;
-      mwb.classList.add('connected');
-    }
-
-    // Mobile bottom nav wallet button
-    const mb = document.getElementById('mobileConnectBtn');
-    if (mb) {
-      const lbl = mb.querySelector('#mobileNavWalletLabel');
-      if (lbl) lbl.textContent = short;
-      mb.style.borderColor  = 'var(--success)';
-      mb.style.color        = 'var(--success)';
-      mb.style.background   = 'rgba(16,185,129,0.1)';
-    }
+    // Mobile top nav — artık ayrı badge yok, sadece connectBtn
+    // (btn güncellendi zaten yukarıda)
 
     // Modal state
     document.getElementById('connectedInfo').style.display  = 'block';
@@ -4104,10 +4061,6 @@
       const short   = walletAddress.slice(0, 6) + '…' + walletAddress.slice(-4);
       const btn = document.getElementById('connectBtn');
       if (btn) btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:6px;vertical-align:-2px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>${short}`;
-      const mwb2 = document.getElementById('mobileWalletBadge');
-      if (mwb2) document.getElementById('mobileWalletAddr').textContent = short;
-      const mb2 = document.getElementById('mobileConnectBtn');
-      if (mb2) { const lbl = mb2.querySelector('#mobileNavWalletLabel'); if(lbl) lbl.textContent = short; }
       document.getElementById('connectedAddr').textContent = walletAddress;
     }
   }
@@ -4143,22 +4096,7 @@
     const badge = document.getElementById('chainBadge');
     if (badge) badge.style.display = 'none';
 
-    // Mobile top nav badge reset
-    const mwb = document.getElementById('mobileWalletBadge');
-    if (mwb) {
-      document.getElementById('mobileWalletAddr').textContent = 'Connect';
-      mwb.classList.remove('connected');
-    }
-
-    // Mobile bottom nav wallet button reset
-    const mb = document.getElementById('mobileConnectBtn');
-    if (mb) {
-      const lbl = mb.querySelector('#mobileNavWalletLabel');
-      if (lbl) lbl.textContent = 'Wallet';
-      mb.style.borderColor = '';
-      mb.style.color       = '';
-      mb.style.background  = '';
-    }
+    // Mobile top nav badge reset — artık ayrı badge yok
 
     document.getElementById('connectedInfo').style.display  = 'none';
     document.getElementById('disconnectBtn').style.display  = 'none';
@@ -5157,15 +5095,12 @@
 
     // Swap active page in DOM directly (showPage not yet safe to call)
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
-    document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.nav-tab').forEach(a => a.classList.remove('active'));
 
     const pageEl = document.getElementById('page-' + pageId);
     if (pageEl) pageEl.classList.add('active');
     const navEl = document.getElementById('nav-' + pageId);
     if (navEl) navEl.classList.add('active');
-    const mnavEl = document.getElementById('mnav-' + pageId);
-    if (mnavEl) mnavEl.classList.add('active');
 
     currentPage = pageId;
     history.replaceState({ page: pageId }, '', PAGE_ROUTES[pageId] || '/search');
