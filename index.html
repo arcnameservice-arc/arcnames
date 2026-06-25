@@ -1379,7 +1379,7 @@
 
     /* stats */
     .stats-section { padding: 28px 16px; }
-    .stats-kpi-grid { gap: 10px; }
+    .stats-kpi-grid { gap: 10px; grid-template-columns: 1fr 1fr; }
     .kpi-card { padding: 16px; }
     .kpi-value { font-size: 24px; }
     .charts-grid { grid-template-columns: 1fr; }
@@ -1941,14 +1941,6 @@
         <div class="kpi-label">Avg. name length</div>
         <div class="kpi-value" id="kpi-avglen">—</div>
         <div class="kpi-sub">characters</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Renewals (all time)</div>
-        <div class="kpi-value" id="kpi-renewals">—</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Transfers (all time)</div>
-        <div class="kpi-value" id="kpi-transfers">—</div>
       </div>
     </div>
 
@@ -3089,8 +3081,6 @@
       document.getElementById('kpi-usdc').textContent      = '$' + totalUSDC.toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0});
       document.getElementById('kpi-owners').textContent    = uniqueOwners.toLocaleString();
       document.getElementById('kpi-avglen').textContent    = avgLen;
-      document.getElementById('kpi-renewals').textContent  = allRen.length.toLocaleString();
-      document.getElementById('kpi-transfers').textContent = allTr.length.toLocaleString();
 
       // ── Update hero stats row ──
       const heroTotal  = document.getElementById('hero-total');
