@@ -4926,7 +4926,7 @@
       try { addrCache = JSON.parse(localStorage.getItem(addrCacheKey) || 'null'); } catch(e) {}
 
       const CHUNK = 9999, BATCH = 8;
-      let events = addrCache ? [...addrCache.events] : [];
+      let events = addrCache ? addrCache.events.map(e => ({...e, paid: parseFloat(e.paid) || 0})) : [];
 
       const regFrom = addrCache ? addrCache.scannedToBlock + 1 : REGISTRY_DEPLOY_BLOCK;
       const mktFrom = addrCache ? Math.max(addrCache.scannedToBlock + 1, MARKET_DEPLOY_BLOCK) : MARKET_DEPLOY_BLOCK;
@@ -4971,7 +4971,11 @@
       events.sort((a,b) => b.block - a.block);
 
       // 5. Metrics
-      const totalUsdc = events.filter(e => e.type==='register'||e.type==='renew').reduce((s,e)=>s+e.paid,0);
+      const totalUsdc = parseFloat(
+        events.filter(e => e.type==='register'||e.type==='renew')
+              .reduce((s, e) => s + (parseFloat(e.paid) || 0), 0)
+              .toFixed(2)
+      );
       const firstReg  = events.filter(e=>e.type==='register').sort((a,b)=>a.block-b.block)[0];
       const firstRegStr = firstReg
         ? new Date(Date.now() - blocksToSecs(curBlock - firstReg.block) * 1000).toLocaleDateString('en-US',{month:'short',year:'numeric'})
@@ -5048,7 +5052,7 @@
           </div>
         </div>`).join('') || `<div style="font-size:13px;color:var(--muted2);padding:12px 0">No activity yet.</div>`;
 
-      const usdcStr = totalUsdc > 0 ? '$'+(totalUsdc%1===0?totalUsdc:totalUsdc.toFixed(0)) : '—';
+      const usdcStr = totalUsdc > 0 ? '$' + (Number.isInteger(totalUsdc) ? totalUsdc : totalUsdc.toFixed(0)) : '—';
 
       wrap.innerHTML = `
         <!-- Hero -->
