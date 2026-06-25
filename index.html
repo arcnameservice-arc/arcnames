@@ -1204,7 +1204,7 @@
 
   .market-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
     gap: 16px;
   }
 
@@ -1270,6 +1270,35 @@
     border-radius: 10px; background: rgba(52,211,153,0.1); color: var(--success);
     border: 1px solid rgba(52,211,153,0.3);
   }
+
+  /* ── Market Pagination ── */
+  .market-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 32px;
+    flex-wrap: wrap;
+  }
+
+  .pg-btn {
+    min-width: 36px; height: 36px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border2);
+    background: var(--bg2);
+    color: var(--muted2);
+    font-size: 13px; font-weight: 600;
+    font-family: 'Space Grotesk', sans-serif;
+    cursor: pointer;
+    transition: all .15s;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .pg-btn:hover { border-color: var(--arc); color: var(--arc); background: var(--arc-dim); }
+  .pg-btn.active { background: var(--arc); color: #fff; border-color: var(--arc); }
+  .pg-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+  .pg-btn.prev-next { gap: 4px; padding: 0 12px; }
 
   .recent-sales-list { display: grid; gap: 8px; }
 
@@ -1474,7 +1503,7 @@
   }
 
   @media (max-width: 400px) {
-    .market-grid { grid-template-columns: 1fr; }
+    .market-grid { grid-template-columns: 1fr 1fr; }
     .nft-grid { grid-template-columns: repeat(2, 1fr); }
   }
 
@@ -2023,6 +2052,9 @@
 
     <!-- Market grid -->
     <div class="market-grid" id="marketGrid"></div>
+
+    <!-- Pagination -->
+    <div class="market-pagination" id="marketPagination"></div>
 
     <!-- Recent sales -->
     <div style="margin-top:56px">
@@ -4411,6 +4443,10 @@
   let cachedListings = [];
   let cachedSales    = [];
   let marketFetching = false;
+  // Pagination state
+  const MARKET_PER_PAGE = 12;
+  let marketCurrentPage = 1;
+  let marketFilteredList = [];
 
   async function renderMarket() {
     if (marketFetching) return;
@@ -4472,45 +4508,54 @@
     if (sort === 'price-asc')  list = list.sort((a,b) => a.price - b.price);
     else if (sort === 'price-desc') list = list.sort((a,b) => b.price - a.price);
     else if (sort === 'length') list = list.sort((a,b) => a.name.length - b.name.length);
-    else list = list.sort((a,b) => b.listedAt - a.listedAt); // recent
+    else list = list.sort((a,b) => b.listedAt - a.listedAt);
+
+    // Store filtered list, reset to page 1 when filter/sort changes
+    marketFilteredList = list;
+    marketCurrentPage  = 1;
 
     document.getElementById('mListingCount').textContent = list.length;
 
-    // Floor price
     const floorEl = document.getElementById('mFloor');
     if (floorEl) {
-      if (list.length > 0) {
-        const floor = Math.min(...list.map(l => l.price));
-        floorEl.textContent = '$' + floor.toLocaleString() + ' USDC';
-      } else {
-        floorEl.textContent = '—';
-      }
+      floorEl.textContent = list.length > 0
+        ? '$' + Math.min(...list.map(l => l.price)).toLocaleString() + ' USDC'
+        : '—';
     }
 
-    // Volume from recent sales
     const volumeEl = document.getElementById('mVolume');
     if (volumeEl) {
-      if (cachedSales.length > 0) {
-        const sevenDaysAgo = Date.now() / 1000 - 7 * 86400;
-        const vol = cachedSales
-          .filter(s => s.block > 0) // all we have
-          .reduce((sum, s) => sum + s.price, 0);
-        volumeEl.textContent = '$' + vol.toLocaleString(undefined, {maximumFractionDigits:0}) + ' USDC';
-      } else {
-        volumeEl.textContent = '$0 USDC';
-      }
+      const vol = cachedSales.reduce((s, x) => s + x.price, 0);
+      volumeEl.textContent = '$' + vol.toLocaleString(undefined, {maximumFractionDigits:0}) + ' USDC';
     }
 
+    renderMarketPage();
+  }
+
+  function renderMarketPage() {
+    const grid = document.getElementById('marketGrid');
+    const list = marketFilteredList;
+
     if (list.length === 0) {
+      const q = (document.getElementById('marketSearch')?.value || '').toLowerCase();
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🏷️</div><h3>${q ? 'No results for "'+q+'"' : 'No active listings'}</h3><p>${q ? 'Try a different search term.' : 'Be the first to list a name!'}</p></div>`;
+      renderPagination(0);
       return;
     }
 
-    grid.innerHTML = list.map(item => {
-      const chars     = item.name.length;
+    const totalPages = Math.ceil(list.length / MARKET_PER_PAGE);
+    // Clamp current page
+    if (marketCurrentPage < 1) marketCurrentPage = 1;
+    if (marketCurrentPage > totalPages) marketCurrentPage = totalPages;
+
+    const start = (marketCurrentPage - 1) * MARKET_PER_PAGE;
+    const pageItems = list.slice(start, start + MARKET_PER_PAGE);
+
+    grid.innerHTML = pageItems.map(item => {
+      const chars       = item.name.length;
       const sellerShort = item.seller.slice(0,6) + '…' + item.seller.slice(-4);
-      const isOwn     = walletConnected && item.seller.toLowerCase() === walletAddress.toLowerCase();
-      const expiryStr = item.expiry
+      const isOwn       = walletConnected && item.seller.toLowerCase() === walletAddress.toLowerCase();
+      const expiryStr   = item.expiry
         ? new Date(item.expiry * 1000).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
         : '—';
       const listedStr = timeAgo(item.listedAt);
@@ -4534,9 +4579,65 @@
           </div>
         </div>`;
     }).join('');
+
+    renderPagination(totalPages);
   }
 
-  function filterMarket() { applyMarketFilter(); }
+  function renderPagination(totalPages) {
+    const wrap = document.getElementById('marketPagination');
+    if (!wrap) return;
+    if (totalPages <= 1) { wrap.innerHTML = ''; return; }
+
+    const cur = marketCurrentPage;
+    let html = '';
+
+    // Prev button
+    html += `<button class="pg-btn prev-next" onclick="goMarketPage(${cur - 1})" ${cur === 1 ? 'disabled' : ''}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+      Prev
+    </button>`;
+
+    // Page numbers — show max 7 buttons with ellipsis
+    const pages = buildPageRange(cur, totalPages);
+    pages.forEach(p => {
+      if (p === '…') {
+        html += `<span class="pg-btn" style="cursor:default;pointer-events:none">…</span>`;
+      } else {
+        html += `<button class="pg-btn ${p === cur ? 'active' : ''}" onclick="goMarketPage(${p})">${p}</button>`;
+      }
+    });
+
+    // Next button
+    html += `<button class="pg-btn prev-next" onclick="goMarketPage(${cur + 1})" ${cur === totalPages ? 'disabled' : ''}>
+      Next
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+    </button>`;
+
+    wrap.innerHTML = html;
+  }
+
+  function buildPageRange(cur, total) {
+    if (total <= 7) return Array.from({length: total}, (_, i) => i + 1);
+    if (cur <= 4)  return [1, 2, 3, 4, 5, '…', total];
+    if (cur >= total - 3) return [1, '…', total-4, total-3, total-2, total-1, total];
+    return [1, '…', cur-1, cur, cur+1, '…', total];
+  }
+
+  function goMarketPage(page) {
+    const totalPages = Math.ceil(marketFilteredList.length / MARKET_PER_PAGE);
+    if (page < 1 || page > totalPages) return;
+    marketCurrentPage = page;
+    renderMarketPage();
+    // Scroll to top of market grid
+    const el = document.getElementById('marketGrid');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function filterMarket() {
+    // Reset to page 1 on search/sort change
+    marketCurrentPage = 1;
+    applyMarketFilter();
+  }
 
   async function loadRecentSales(prov) {
     const salesEl = document.getElementById('recentSalesList');
