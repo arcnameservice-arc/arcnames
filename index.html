@@ -1817,7 +1817,6 @@
     <div class="nav-right">
       <div class="chain-badge" id="chainBadge" style="display:none">
         <div class="chain-dot"></div>
-        <span>Arc Testnet</span>
       </div>
       <button class="btn-connect" id="connectBtn" onclick="showWalletModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;flex-shrink:0"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 14a1 1 0 1 0 2 0 1 1 0 0 0-2 0z" fill="currentColor" stroke="none"/><path d="M22 11V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4"/></svg>
@@ -2012,6 +2011,7 @@
         <div class="chart-title">Recent protocol activity</div>
         <div class="chart-sub">Latest transactions across all wallets</div>
         <div class="activity-mini" id="globalActivity"></div>
+        <div class="market-pagination" id="globalActivityPagination" style="margin-top:16px"></div>
       </div>
     </div>
   </div>
@@ -2051,11 +2051,6 @@
 
     <!-- Pagination -->
     <div class="market-pagination" id="marketPagination"></div>
-
-    <!-- Recent sales -->
-    <div style="margin-top:56px">
-      <div class="recent-sales-list" id="recentSalesList"></div>
-    </div>
   </div>
 </div>
 
@@ -2071,7 +2066,7 @@
 
 <!-- Sell Modal -->
 <div class="modal-overlay" id="sellModal">
-  <div class="modal" style="width:400px">
+  <div class="modal" style="width:400px;max-height:92vh;overflow-y:auto;display:flex;flex-direction:column;">
     <h3>List for Sale</h3>
     <p>Set a price and list <strong id="sellModalName" style="color:var(--arc)">satoshi.arc</strong> on the marketplace.</p>
     <!-- Market deployed — no warning needed -->
@@ -2102,7 +2097,7 @@
       ℹ Listing requires 2 transactions: (1) transfer name to escrow, (2) set price.
     </div>
     <button class="btn-register" onclick="doListForSale()">List on Marketplace</button>
-    <button class="modal-close" onclick="closeModal('sellModal')">Cancel</button>
+    <button class="modal-close" onclick="closeModal('sellModal')" style="position:sticky;bottom:0;background:var(--bg2)">Cancel</button>
   </div>
 </div>
 
@@ -3209,9 +3204,7 @@
       // ── Global activity feed ──
       const actEl = document.getElementById('globalActivity');
       if (!actEl) return;
-      actEl.innerHTML = '';
 
-      // Safe USDC formatter — handles both BigNumber (live) and string (cache)
       const safeFmt = (paid) => {
         try {
           if (!paid) return '0.00';
@@ -3222,55 +3215,103 @@
         } catch(e) { return '?'; }
       };
 
-      const allEvents = [
+      _allStatsEvents = [
         ...allReg.map(e => ({
           type:   'register',
           block:  e.blockNumber,
           name:   e.args.name,
+          owner:  e.args.owner,
           detail: `Registered by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${safeFmt(e.args.paid)} USDC`,
         })),
         ...allRen.map(e => ({
           type:   'renew',
           block:  e.blockNumber,
           name:   e.args.name,
+          owner:  e.args.owner,
           detail: `Renewed by ${e.args.owner.slice(0,6)}…${e.args.owner.slice(-4)} · $${safeFmt(e.args.paid)} USDC`,
         })),
         ...allTr.map(e => ({
           type:   'transfer',
           block:  e.blockNumber,
           name:   e.args.name  || '?',
+          owner:  e.args.to    || '',
           detail: `Transferred to ${(e.args.to || '').slice(0,6)}…${(e.args.to || '').slice(-4)}`,
         })),
-      ].sort((a, b) => b.block - a.block).slice(0, 10);
+      ].sort((a, b) => b.block - a.block);
 
-      if (allEvents.length === 0) {
-        actEl.innerHTML = `<div style="text-align:center;color:var(--muted2);font-size:13px;padding:24px 0">
-          No activity yet — be the first to register a name! 🚀</div>`;
-      } else {
-        allEvents.forEach(a => {
-          const blocksAgo = currentBlock - a.block;
-          const secsAgo   = blocksToSecs(blocksAgo);
-          const timeStr   = secsAgo < 60    ? `${secsAgo}s ago`
-                          : secsAgo < 3600  ? `${Math.floor(secsAgo / 60)}m ago`
-                          : secsAgo < 86400 ? `${Math.floor(secsAgo / 3600)}h ago`
-                          :                   `${Math.floor(secsAgo / 86400)}d ago`;
-          actEl.innerHTML += `
-            <div class="activity-mini-item">
-              <div class="activity-type-dot ${a.type}"></div>
-              <div style="flex:1">
-                <span style="font-family:'Space Mono',monospace;font-size:13px;color:var(--text)">${a.name}<span style="color:var(--arc)">.arc</span></span>
-                <span style="color:var(--muted2);font-size:12px;margin-left:8px">${a.detail}</span>
-              </div>
-              <div style="font-size:12px;color:var(--muted);font-family:'Space Mono',monospace;white-space:nowrap">${timeStr}</div>
-            </div>`;
-        });
-      }
+      _statsActPage = 1;
+      renderStatsActivity(currentBlock);
 
       // Update last-updated timestamp
       const tsEl = document.getElementById('statsLastUpdated');
       if (tsEl) tsEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
 
   } // end renderStatsFromData
+
+  function renderStatsActivity(currentBlock) {
+    const actEl  = document.getElementById('globalActivity');
+    const pgWrap = document.getElementById('globalActivityPagination');
+    if (!actEl) return;
+
+    if (_allStatsEvents.length === 0) {
+      actEl.innerHTML = `<div style="text-align:center;color:var(--muted2);font-size:13px;padding:24px 0">No activity yet — be the first to register a name! 🚀</div>`;
+      if (pgWrap) pgWrap.innerHTML = '';
+      return;
+    }
+
+    const total = _allStatsEvents.length;
+    const pages = Math.ceil(total / STATS_ACT_PER_PAGE);
+    if (_statsActPage < 1) _statsActPage = 1;
+    if (_statsActPage > pages) _statsActPage = pages;
+
+    const start  = (_statsActPage - 1) * STATS_ACT_PER_PAGE;
+    const pageEv = _allStatsEvents.slice(start, start + STATS_ACT_PER_PAGE);
+
+    actEl.innerHTML = pageEv.map(a => {
+      const blocksAgo = currentBlock - a.block;
+      const secsAgo   = blocksToSecs(blocksAgo);
+      const timeStr   = secsAgo < 60    ? `${secsAgo}s ago`
+                      : secsAgo < 3600  ? `${Math.floor(secsAgo / 60)}m ago`
+                      : secsAgo < 86400 ? `${Math.floor(secsAgo / 3600)}h ago`
+                      :                   `${Math.floor(secsAgo / 86400)}d ago`;
+      return `
+        <div class="activity-mini-item" style="cursor:pointer" onclick="goToProfile('${a.name}')">
+          <div class="activity-type-dot ${a.type}"></div>
+          <div style="flex:1">
+            <span style="font-family:'Space Mono',monospace;font-size:13px;color:var(--text)">${a.name}<span style="color:var(--arc)">.arc</span></span>
+            <span style="color:var(--muted2);font-size:12px;margin-left:8px">${a.detail}</span>
+          </div>
+          <div style="font-size:12px;color:var(--muted);font-family:'Space Mono',monospace;white-space:nowrap">${timeStr}</div>
+        </div>`;
+    }).join('');
+
+    // Pagination
+    if (pgWrap) {
+      if (pages <= 1) { pgWrap.innerHTML = ''; return; }
+      const cur = _statsActPage;
+      const range = buildPageRange(cur, pages);
+      let html = `<button class="pg-btn prev-next" onclick="goStatsActPage(${cur-1})" ${cur===1?'disabled':''}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg> Prev</button>`;
+      range.forEach(p => {
+        html += p === '…'
+          ? `<span class="pg-btn" style="cursor:default;pointer-events:none">…</span>`
+          : `<button class="pg-btn ${p===cur?'active':''}" onclick="goStatsActPage(${p})">${p}</button>`;
+      });
+      html += `<button class="pg-btn prev-next" onclick="goStatsActPage(${cur+1})" ${cur===pages?'disabled':''}>Next
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg></button>`;
+      pgWrap.innerHTML = html;
+    }
+  }
+
+  function goStatsActPage(page) {
+    const pages = Math.ceil(_allStatsEvents.length / STATS_ACT_PER_PAGE);
+    if (page < 1 || page > pages) return;
+    _statsActPage = page;
+    // currentBlock is stored in cache — re-derive from latest cache
+    const curBlock = _statsCache ? _statsCache.scannedToBlock : 0;
+    renderStatsActivity(curBlock);
+    document.getElementById('globalActivity')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 
   function setStatsLoadingState(msg) {
     const ids = ['kpi-total','kpi-usdc','kpi-owners','kpi-avglen','kpi-renewals','kpi-transfers'];
@@ -4441,6 +4482,10 @@
   const MARKET_PER_PAGE = 12;
   let marketCurrentPage = 1;
   let marketFilteredList = [];
+  // Stats activity pagination
+  let _allStatsEvents = [];
+  let _statsActPage   = 1;
+  const STATS_ACT_PER_PAGE = 10;
 
   async function renderMarket() {
     if (marketFetching) return;
@@ -5157,14 +5202,46 @@
            <div id="pubHiddenNames" style="display:none">${hiddenHtml}</div>` : '';
 
       const actLabels = { register:'registered', renew:'renewed', list:'listed for sale' };
-      const actHtml = events.slice(0,8).map(a => `
-        <div class="pub-activity-item">
-          <div class="pub-act-dot ${a.type}"></div>
-          <div>
-            <div class="pub-act-name">${a.name}.arc ${actLabels[a.type]||a.type}</div>
-            <div class="pub-act-meta">${pubRelTime(a.block,curBlock)} · ${a.paid%1===0?a.paid:a.paid.toFixed(2)} USDC</div>
-          </div>
-        </div>`).join('') || `<div style="font-size:13px;color:var(--muted2);padding:12px 0">No activity yet.</div>`;
+
+      // Store for pagination
+      window._pubActEvents = events;
+      window._pubActCurBlock = curBlock;
+      window._pubActPage = 1;
+      const PUB_ACT_PER = 5;
+
+      function buildPubActHtml(pg) {
+        const total = window._pubActEvents.length;
+        const pages = Math.ceil(total / PUB_ACT_PER);
+        if (pg < 1) pg = 1; if (pg > pages) pg = pages;
+        window._pubActPage = pg;
+        const slice = window._pubActEvents.slice((pg-1)*PUB_ACT_PER, pg*PUB_ACT_PER);
+        const rows = slice.map(a => `
+          <div class="pub-activity-item">
+            <div class="pub-act-dot ${a.type}"></div>
+            <div>
+              <div class="pub-act-name">${a.name}.arc ${actLabels[a.type]||a.type}</div>
+              <div class="pub-act-meta">${pubRelTime(a.block,window._pubActCurBlock)} · ${a.paid%1===0?a.paid:a.paid.toFixed(2)} USDC</div>
+            </div>
+          </div>`).join('') || `<div style="font-size:13px;color:var(--muted2);padding:12px 0">No activity yet.</div>`;
+
+        let pgHtml = '';
+        if (pages > 1) {
+          const range = buildPageRange(pg, pages);
+          pgHtml = `<div class="market-pagination" style="margin-top:12px">`;
+          pgHtml += `<button class="pg-btn prev-next" onclick="window._pubActPage--;document.getElementById('pubActWrap').innerHTML=buildPubActHtml(window._pubActPage)" ${pg===1?'disabled':''}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg> Prev</button>`;
+          range.forEach(p => {
+            pgHtml += p==='…'
+              ? `<span class="pg-btn" style="cursor:default;pointer-events:none">…</span>`
+              : `<button class="pg-btn ${p===pg?'active':''}" onclick="document.getElementById('pubActWrap').innerHTML=buildPubActHtml(${p})">${p}</button>`;
+          });
+          pgHtml += `<button class="pg-btn prev-next" onclick="window._pubActPage++;document.getElementById('pubActWrap').innerHTML=buildPubActHtml(window._pubActPage)" ${pg===pages?'disabled':''}>Next
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg></button>`;
+          pgHtml += `</div>`;
+        }
+        return rows + pgHtml;
+      }
+      window.buildPubActHtml = buildPubActHtml;
 
       const usdcStr = totalUsdc > 0 ? '$' + (Number.isInteger(totalUsdc) ? totalUsdc : totalUsdc.toFixed(0)) : '—';
 
@@ -5215,7 +5292,7 @@
         <!-- Activity -->
         <div class="pub-card">
           <div class="pub-card-label">Recent activity</div>
-          ${actHtml}
+          <div id="pubActWrap">${buildPubActHtml(1)}</div>
         </div>
       `;
 
