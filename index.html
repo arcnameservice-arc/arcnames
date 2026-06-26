@@ -2473,10 +2473,25 @@
     if (navLinkM) navLinkM.classList.add('active');
 
     // Immediate load + start polling
-    if (id === 'stats')   { renderBarChartSkeleton(); renderDistChartSkeleton(); loadOnChainStats(); startPolling('stats'); }
-    if (id === 'market')  { renderMarket();     startPolling('market'); }
-    if (id === 'mynames') { loadMyNames();      startPolling('mynames'); }
-    if (id === 'search')  {                     startPolling('search'); }
+    if (id === 'stats') {
+      renderBarChartSkeleton();
+      renderDistChartSkeleton();
+      // If stats cache is fresh (< 5 min), just re-render without full scan
+      if (_statsCache && _allStatsEvents.length > 0) {
+        renderStatsFromCache(_statsCache, _statsCurrentBlock || _statsCache.scannedToBlock);
+      } else {
+        loadOnChainStats();
+      }
+      startPolling('stats');
+    }
+    if (id === 'market')  {
+      // Only fetch if not already loaded (cachedListings populated)
+      if (cachedListings.length === 0) { renderMarket(); }
+      else { applyMarketFilter(); }
+      startPolling('market');
+    }
+    if (id === 'mynames') { loadMyNames(); startPolling('mynames'); }
+    if (id === 'search')  { startPolling('search'); }
     // profile: name passed via profileNameArg global, set before calling showPage
     if (id === 'profile') {
       const target = window._profileTarget || (walletConnected ? walletAddress : '');
@@ -2976,7 +2991,7 @@
     return Math.floor(blocksAgo * _measuredBlockTime);
   }
   // Cache key prefix — versioned so stale caches auto-invalidate
-  const CACHE_VERSION = 'v1';
+  const CACHE_VERSION = 'v2';
   const CACHE_KEY     = `arcnames_${CACHE_VERSION}_events`;
 
   function loadCacheFromStorage() {
@@ -3031,11 +3046,13 @@
         const [reg, ren, tr] = r.value;
         newReg = newReg.concat(reg.map(e => ({
           block: e.blockNumber, name: e.args.name,
-          owner: e.args.owner, paid: e.args.paid.toString(),
+          owner: e.args.owner,
+          paid: ethers.utils.formatUnits(e.args.paid, 6), // store as decimal string e.g. "2.0"
         })));
         newRen = newRen.concat(ren.map(e => ({
           block: e.blockNumber, name: e.args.name,
-          owner: e.args.owner, paid: e.args.paid.toString(),
+          owner: e.args.owner,
+          paid: ethers.utils.formatUnits(e.args.paid, 6),
         })));
         newTr = newTr.concat(tr.map(e => ({
           block: e.blockNumber, name: e.args.name || '',
@@ -3090,18 +3107,18 @@
   }
 
   function renderStatsFromCache(cache, currentBlock) {
-    // Convert cached plain objects back to the shape renderStatsFromData expects
-    const fmt = (paidStr) => parseFloat(ethers.utils.formatUnits(ethers.BigNumber.from(paidStr), 6));
+    // paid is now stored as decimal string like "2.0" or "10.5"
+    const fmt = (paidStr) => parseFloat(paidStr) || 0;
 
     const allReg = cache.reg.map(e => ({
       blockNumber: e.block,
       args: { name: e.name, owner: e.owner,
-              paid: { _isBigNumber: true, toString: () => e.paid } },
+              paid: { _decimal: true, _val: parseFloat(e.paid) || 0, toString: () => e.paid } },
     }));
     const allRen = cache.ren.map(e => ({
       blockNumber: e.block,
       args: { name: e.name, owner: e.owner,
-              paid: { _isBigNumber: true, toString: () => e.paid } },
+              paid: { _decimal: true, _val: parseFloat(e.paid) || 0, toString: () => e.paid } },
     }));
     const allTr = cache.tr.map(e => ({
       blockNumber: e.block,
@@ -3207,12 +3224,22 @@
 
       const safeFmt = (paid) => {
         try {
-          if (!paid) return '0.00';
-          const bn = (paid._isBigNumber || paid._hex)
-            ? paid
-            : ethers.BigNumber.from(paid.toString());
-          return parseFloat(ethers.utils.formatUnits(bn, 6)).toFixed(2);
-        } catch(e) { return '?'; }
+          if (paid === null || paid === undefined || paid === '') return '0';
+          // Decimal-cached object
+          if (paid._decimal) return paid._val % 1 === 0 ? String(paid._val) : paid._val.toFixed(2);
+          // Already a plain number
+          if (typeof paid === 'number') return paid % 1 === 0 ? String(paid) : paid.toFixed(2);
+          const s = paid.toString();
+          // Decimal string e.g. "2.0"
+          if (!isNaN(s) && !s.startsWith('0x')) {
+            const v = parseFloat(s);
+            return v % 1 === 0 ? String(v) : v.toFixed(2);
+          }
+          // BigNumber hex
+          const bn = ethers.BigNumber.from(s);
+          const val = parseFloat(ethers.utils.formatUnits(bn, 6));
+          return val % 1 === 0 ? String(val) : val.toFixed(2);
+        } catch(e) { return '0'; }
       };
 
       _allStatsEvents = [
@@ -3240,6 +3267,7 @@
       ].sort((a, b) => b.block - a.block);
 
       _statsActPage = 1;
+      _statsCurrentBlock = currentBlock;
       renderStatsActivity(currentBlock);
 
       // Update last-updated timestamp
@@ -3303,13 +3331,14 @@
     }
   }
 
+  // ── Stats Activity pagination currentBlock storage ──
+  let _statsCurrentBlock = 0;
+
   function goStatsActPage(page) {
     const pages = Math.ceil(_allStatsEvents.length / STATS_ACT_PER_PAGE);
     if (page < 1 || page > pages) return;
     _statsActPage = page;
-    // currentBlock is stored in cache — re-derive from latest cache
-    const curBlock = _statsCache ? _statsCache.scannedToBlock : 0;
-    renderStatsActivity(curBlock);
+    renderStatsActivity(_statsCurrentBlock);
     document.getElementById('globalActivity')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
