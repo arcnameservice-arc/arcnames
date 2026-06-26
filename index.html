@@ -5089,15 +5089,111 @@
       const pValues = profileData[1] || [];
       pKeys.forEach((k, i) => { tm[k] = pValues[i]; });
 
-      // 3. Each name's expiry in parallel
+      // 3. Each name's expiry — fetch in parallel but DON'T block render
       const nameExpiries = {};
-      await Promise.all(allNames.map(async n => {
+      const expiryFetch = Promise.all(allNames.map(async n => {
         try { const r = await reg.getRecord(n); nameExpiries[n] = r.expiry.toNumber(); }
         catch(e) { nameExpiries[n] = 0; }
       }));
 
       // 4. Activity events
       const curBlock = await prov.getBlockNumber();
+
+      // ── Phase 1: Render static UI immediately (before activity scan) ──
+      const displayName = tm['display'] || (name.charAt(0).toUpperCase()+name.slice(1));
+      const bio = tm['bio'] || '';
+      const twitter = tm['com.twitter'] || '';
+      const avatarRaw = tm['avatar'] || '';
+      const letter = name[0].toUpperCase();
+
+      let avatarHtml;
+      if (!avatarRaw) {
+        avatarHtml = letter;
+      } else if (avatarRaw.startsWith('nft:')) {
+        const parts = avatarRaw.split(':');
+        const emoji = parts[1] || '🖼';
+        const bg    = parts[2] || '#0D9488';
+        avatarHtml = `<div style="width:100%;height:100%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:50%">${emoji}</div>`;
+      } else {
+        avatarHtml = `<img src="${avatarRaw}" alt="${displayName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" onerror="this.parentElement.innerHTML='${letter}'">`;
+      }
+
+      const twitterHtml = twitter
+        ? (() => { const h = twitter.startsWith('@') ? twitter : '@'+twitter;
+            return `<a class="pub-social-btn" href="https://x.com/${h.slice(1)}" target="_blank" rel="noopener">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.836L1.254 2.25H8.08l4.259 5.637L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z"/></svg>
+              ${h}</a>`; })()
+        : '';
+
+      const sorted = primaryName ? [primaryName, ...allNames.filter(n=>n!==primaryName)] : [...allNames];
+      const SHOW = 3;
+      const shown  = sorted.slice(0, SHOW);
+      const hidden = sorted.slice(SHOW);
+
+      const makeNameRow = (n, isPrim, expiry) => `
+        <div class="pub-name-row-item">
+          <div class="pub-name-row-left">
+            <div class="pub-name-dot${isPrim?' primary':''}">
+              ${isPrim?`<svg width="8" height="8" viewBox="0 0 24 24" fill="#F59E0B"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`:''}
+            </div>
+            <span class="pub-name-label">${n}.arc</span>
+            ${isPrim?'<span class="pub-primary-tag">✓ primary</span>':''}
+          </div>
+          <span class="pub-name-expiry">${expiry ? 'Expires '+pubFmtExpiry(expiry) : '…'}</span>
+        </div>`;
+
+      const nameRowsHtml = shown.map(n => makeNameRow(n, n===primaryName, nameExpiries[n]||0)).join('');
+      const hiddenHtml   = hidden.map(n => makeNameRow(n, false, nameExpiries[n]||0)).join('');
+      const moreHtml = hidden.length > 0
+        ? `<button class="pub-more-btn" id="pubMoreBtn" onclick="document.getElementById('pubHiddenNames').style.display='block';this.style.display='none'">
+            + ${hidden.length} more name${hidden.length>1?'s':''}
+           </button>
+           <div id="pubHiddenNames" style="display:none">${hiddenHtml}</div>` : '';
+
+      // Render shell with activity spinner — user sees content immediately
+      wrap.innerHTML = `
+        <div class="pub-hero">
+          <div class="pub-avatar">${avatarHtml}</div>
+          <div class="pub-hero-info">
+            <div class="pub-name-row">
+              <span class="pub-display-name">${displayName}</span>
+              <span class="pub-arc-badge" onclick="goToProfile('${name}')" title="Public profile">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                ${name}.arc
+              </span>
+            </div>
+            ${bio?`<div class="pub-bio">${bio}</div>`:''}
+            <a class="pub-addr-chip" href="https://testnet.arcscan.app/address/${ownerAddr}" target="_blank" rel="noopener">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              ${shortAddr}
+            </a>
+            ${twitterHtml?`<div class="pub-socials">${twitterHtml}</div>`:''}
+          </div>
+        </div>
+        <div class="pub-metrics">
+          <div class="pub-metric"><div class="pub-metric-label">Total Names</div><div class="pub-metric-value">${sorted.length}</div></div>
+          <div class="pub-metric"><div class="pub-metric-label">USDC Spent</div><div class="pub-metric-value" id="pubUsdcSpent">…</div></div>
+          <div class="pub-metric"><div class="pub-metric-label">First Registered</div><div class="pub-metric-value sm" id="pubFirstReg">…</div></div>
+        </div>
+        <div class="pub-card">
+          <div class="pub-card-label">.arc names</div>
+          <div id="pubNameRows">${nameRowsHtml}</div>
+          ${moreHtml}
+        </div>
+        <div class="pub-card">
+          <div class="pub-card-label">Recent activity</div>
+          <div id="pubActWrap"><div style="text-align:center;padding:20px 0"><div class="pub-spinner" style="width:22px;height:22px;border-width:2px;margin:0 auto"></div></div></div>
+        </div>`;
+
+      // Update expiry data when ready (non-blocking)
+      expiryFetch.then(() => {
+        const nr = document.getElementById('pubNameRows');
+        if (nr) nr.innerHTML = shown.map(n => makeNameRow(n, n===primaryName, nameExpiries[n]||0)).join('');
+        const hn = document.getElementById('pubHiddenNames');
+        if (hn) hn.innerHTML = hidden.map(n => makeNameRow(n, false, nameExpiries[n]||0)).join('');
+      });
+
+      // ── Phase 2: Activity scan in background ──
       const ACTIVITY_ABI_PUB = [
         "event Registered(address indexed owner, string name, uint256 numYears, uint256 expiry, uint256 paid)",
         "event Renewed(address indexed owner, string name, uint256 numYears, uint256 newExpiry, uint256 paid)",
@@ -5153,89 +5249,31 @@
         }
       }
 
-      // Save updated cache
       try { localStorage.setItem(addrCacheKey, JSON.stringify({ scannedToBlock: curBlock, events })); } catch(e) {}
 
       events.sort((a,b) => b.block - a.block);
 
-      // 5. Metrics
+      // Update metrics now that we have activity data
       const totalUsdc = parseFloat(
         events.filter(e => e.type==='register'||e.type==='renew')
               .reduce((s, e) => s + (parseFloat(e.paid) || 0), 0)
               .toFixed(2)
       );
-      const firstReg  = events.filter(e=>e.type==='register').sort((a,b)=>a.block-b.block)[0];
+      const firstReg = events.filter(e=>e.type==='register').sort((a,b)=>a.block-b.block)[0];
       const firstRegStr = firstReg
         ? new Date(Date.now() - blocksToSecs(curBlock - firstReg.block) * 1000).toLocaleDateString('en-US',{month:'short',year:'numeric'})
         : pubFmtExpiry(rec.registeredAt.toNumber());
 
-      // 6. Render
-      const displayName = tm['display'] || (name.charAt(0).toUpperCase()+name.slice(1));
-      const bio = tm['bio'] || '';
-      const twitter = tm['com.twitter'] || '';
-      const avatarRaw = tm['avatar'] || '';
-      const letter = name[0].toUpperCase();
+      const usdcEl = document.getElementById('pubUsdcSpent');
+      const fregEl = document.getElementById('pubFirstReg');
+      if (usdcEl) usdcEl.textContent = totalUsdc > 0 ? '$'+(Number.isInteger(totalUsdc)?totalUsdc:totalUsdc.toFixed(0)) : '—';
+      if (fregEl) fregEl.textContent = firstRegStr || '—';
 
-      // Parse avatar — URL or "nft:emoji:color"
-      let avatarHtml;
-      if (!avatarRaw) {
-        avatarHtml = letter;
-      } else if (avatarRaw.startsWith('nft:')) {
-        const parts = avatarRaw.split(':');
-        const emoji = parts[1] || '🖼';
-        const bg    = parts[2] || '#0D9488';
-        avatarHtml = `<div style="width:100%;height:100%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:50%">${emoji}</div>`;
-      } else {
-        avatarHtml = `<img src="${avatarRaw}" alt="${displayName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block" onerror="this.parentElement.innerHTML='${letter}'">`;
-      }
-
-      const twitterHtml = twitter
-        ? (() => { const h = twitter.startsWith('@') ? twitter : '@'+twitter;
-            return `<a class="pub-social-btn" href="https://x.com/${h.slice(1)}" target="_blank" rel="noopener">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.836L1.254 2.25H8.08l4.259 5.637L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z"/></svg>
-              ${h}</a>`; })()
-        : '';
-
-      // Names sorted: primary first
-      const sorted = primaryName ? [primaryName, ...allNames.filter(n=>n!==primaryName)] : [...allNames];
-      const SHOW = 3;
-      const shown  = sorted.slice(0, SHOW);
-      const hidden = sorted.slice(SHOW);
-
-      const nameRowsHtml = shown.map(n => {
-        const isPrim = n === primaryName;
-        return `<div class="pub-name-row-item">
-          <div class="pub-name-row-left">
-            <div class="pub-name-dot${isPrim?' primary':''}">
-              ${isPrim?`<svg width="8" height="8" viewBox="0 0 24 24" fill="#F59E0B"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`:''}
-            </div>
-            <span class="pub-name-label">${n}.arc</span>
-            ${isPrim?'<span class="pub-primary-tag">✓ primary</span>':''}
-          </div>
-          <span class="pub-name-expiry">Expires ${pubFmtExpiry(nameExpiries[n]||0)}</span>
-        </div>`;
-      }).join('');
-
-      const hiddenHtml = hidden.map(n => `<div class="pub-name-row-item">
-          <div class="pub-name-row-left">
-            <div class="pub-name-dot"></div>
-            <span class="pub-name-label">${n}.arc</span>
-          </div>
-          <span class="pub-name-expiry">Expires ${pubFmtExpiry(nameExpiries[n]||0)}</span>
-        </div>`).join('');
-
-      const moreHtml = hidden.length > 0
-        ? `<button class="pub-more-btn" id="pubMoreBtn" onclick="document.getElementById('pubHiddenNames').style.display='block';this.style.display='none'">
-            + ${hidden.length} more name${hidden.length>1?'s':''}
-           </button>
-           <div id="pubHiddenNames" style="display:none">${hiddenHtml}</div>` : '';
-
+      // Build and show activity with pagination
       const actLabels = { register:'registered', renew:'renewed', list:'listed for sale' };
-
-      // Store for pagination
-      window._pubActEvents = events;
+      window._pubActEvents   = events;
       window._pubActCurBlock = curBlock;
-      window._pubActPage = 1;
+      window._pubActPage     = 1;
       const PUB_ACT_PER = 5;
 
       function buildPubActHtml(pg) {
@@ -5252,78 +5290,27 @@
               <div class="pub-act-meta">${pubRelTime(a.block,window._pubActCurBlock)} · ${a.paid%1===0?a.paid:a.paid.toFixed(2)} USDC</div>
             </div>
           </div>`).join('') || `<div style="font-size:13px;color:var(--muted2);padding:12px 0">No activity yet.</div>`;
-
         let pgHtml = '';
         if (pages > 1) {
           const range = buildPageRange(pg, pages);
           pgHtml = `<div class="market-pagination" style="margin-top:12px">`;
-          pgHtml += `<button class="pg-btn prev-next" onclick="window._pubActPage--;document.getElementById('pubActWrap').innerHTML=buildPubActHtml(window._pubActPage)" ${pg===1?'disabled':''}>
+          pgHtml += `<button class="pg-btn prev-next" onclick="window._pubActPage--;document.getElementById('pubActWrap').innerHTML=window.buildPubActHtml(window._pubActPage)" ${pg===1?'disabled':''}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg> Prev</button>`;
           range.forEach(p => {
             pgHtml += p==='…'
               ? `<span class="pg-btn" style="cursor:default;pointer-events:none">…</span>`
-              : `<button class="pg-btn ${p===pg?'active':''}" onclick="document.getElementById('pubActWrap').innerHTML=buildPubActHtml(${p})">${p}</button>`;
+              : `<button class="pg-btn ${p===pg?'active':''}" onclick="document.getElementById('pubActWrap').innerHTML=window.buildPubActHtml(${p})">${p}</button>`;
           });
-          pgHtml += `<button class="pg-btn prev-next" onclick="window._pubActPage++;document.getElementById('pubActWrap').innerHTML=buildPubActHtml(window._pubActPage)" ${pg===pages?'disabled':''}>Next
+          pgHtml += `<button class="pg-btn prev-next" onclick="window._pubActPage++;document.getElementById('pubActWrap').innerHTML=window.buildPubActHtml(window._pubActPage)" ${pg===pages?'disabled':''}>Next
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg></button>`;
-          pgHtml += `</div>`;
+          pgHtml += '</div>';
         }
         return rows + pgHtml;
       }
       window.buildPubActHtml = buildPubActHtml;
 
-      const usdcStr = totalUsdc > 0 ? '$' + (Number.isInteger(totalUsdc) ? totalUsdc : totalUsdc.toFixed(0)) : '—';
-
-      wrap.innerHTML = `
-        <!-- Hero -->
-        <div class="pub-hero">
-          <div class="pub-avatar">${avatarHtml}</div>
-          <div class="pub-hero-info">
-            <div class="pub-name-row">
-              <span class="pub-display-name">${displayName}</span>
-              <span class="pub-arc-badge" onclick="goToProfile('${name}')" title="Public profile">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                ${name}.arc
-              </span>
-            </div>
-            ${bio?`<div class="pub-bio">${bio}</div>`:''}
-            <a class="pub-addr-chip" href="https://testnet.arcscan.app/address/${ownerAddr}" target="_blank" rel="noopener">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-              ${shortAddr}
-            </a>
-            ${twitterHtml?`<div class="pub-socials">${twitterHtml}</div>`:''}
-          </div>
-        </div>
-
-        <!-- Metrics -->
-        <div class="pub-metrics">
-          <div class="pub-metric">
-            <div class="pub-metric-label">Total Names</div>
-            <div class="pub-metric-value">${sorted.length}</div>
-          </div>
-          <div class="pub-metric">
-            <div class="pub-metric-label">USDC Spent</div>
-            <div class="pub-metric-value">${usdcStr}</div>
-          </div>
-          <div class="pub-metric">
-            <div class="pub-metric-label">First Registered</div>
-            <div class="pub-metric-value sm">${firstRegStr||'—'}</div>
-          </div>
-        </div>
-
-        <!-- Names -->
-        <div class="pub-card">
-          <div class="pub-card-label">.arc names</div>
-          ${nameRowsHtml}
-          ${moreHtml}
-        </div>
-
-        <!-- Activity -->
-        <div class="pub-card">
-          <div class="pub-card-label">Recent activity</div>
-          <div id="pubActWrap">${buildPubActHtml(1)}</div>
-        </div>
-      `;
+      const actWrap = document.getElementById('pubActWrap');
+      if (actWrap) actWrap.innerHTML = buildPubActHtml(1);
 
     } catch(err) {
       console.error('loadPublicProfile:', err);
