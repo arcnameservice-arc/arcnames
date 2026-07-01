@@ -874,6 +874,7 @@
   .activity-type-dot.register { background: var(--arc); }
   .activity-type-dot.renew    { background: var(--warn); }
   .activity-type-dot.transfer { background: var(--purple); }
+  .activity-type-dot.list     { background: #F59E0B; }
   .activity-type-dot.sale     { background: var(--success); }
 
   /* ── Social links (fixed bottom-right) ── */
@@ -3068,7 +3069,7 @@
     return Math.floor(blocksAgo * _measuredBlockTime);
   }
   // Cache key prefix — versioned so stale caches auto-invalidate
-  const CACHE_VERSION = 'v2';
+  const CACHE_VERSION = 'v3';
   const CACHE_KEY     = `arcnames_${CACHE_VERSION}_events`;
 
   function loadCacheFromStorage() {
@@ -3102,13 +3103,27 @@
   // Scan only the missing range, append to existing cache
   async function scanNewBlocks(prov, registry, fromBlock, toBlock) {
     const CHUNK = 9999;
-    const BATCH = 8; // parallel chunks per round
+    const BATCH = 8;
     const ranges = [];
     for (let f = fromBlock; f <= toBlock; f += CHUNK) {
       ranges.push({ from: f, to: Math.min(f + CHUNK - 1, toBlock) });
     }
 
-    let newReg = [], newRen = [], newTr = [];
+    const MARKET_STATS_ABI = [
+      "event Listed(address indexed seller, string name, uint256 price)",
+      "event Sold(address indexed seller, address indexed buyer, string name, uint256 price, uint256 fee)",
+    ];
+    const market = new ethers.Contract(MARKET_ADDRESS, MARKET_STATS_ABI, prov);
+
+    // Market ranges start from MARKET_DEPLOY_BLOCK
+    const mktRanges = [];
+    for (let f = Math.max(fromBlock, MARKET_DEPLOY_BLOCK); f <= toBlock; f += CHUNK) {
+      mktRanges.push({ from: f, to: Math.min(f + CHUNK - 1, toBlock) });
+    }
+
+    let newReg = [], newRen = [], newTr = [], newListed = [], newSold = [];
+
+    // Registry events
     for (let i = 0; i < ranges.length; i += BATCH) {
       const batch = ranges.slice(i, i + BATCH);
       const results = await Promise.allSettled(batch.map(({ from, to }) =>
@@ -3124,7 +3139,7 @@
         newReg = newReg.concat(reg.map(e => ({
           block: e.blockNumber, name: e.args.name,
           owner: e.args.owner,
-          paid: ethers.utils.formatUnits(e.args.paid, 6), // store as decimal string e.g. "2.0"
+          paid: ethers.utils.formatUnits(e.args.paid, 6),
         })));
         newRen = newRen.concat(ren.map(e => ({
           block: e.blockNumber, name: e.args.name,
@@ -3137,7 +3152,33 @@
         })));
       });
     }
-    return { newReg, newRen, newTr };
+
+    // Market events
+    for (let i = 0; i < mktRanges.length; i += BATCH) {
+      const batch = mktRanges.slice(i, i + BATCH);
+      const results = await Promise.allSettled(batch.map(({ from, to }) =>
+        Promise.all([
+          market.queryFilter(market.filters.Listed(),  from, to),
+          market.queryFilter(market.filters.Sold(),    from, to),
+        ])
+      ));
+      results.forEach(r => {
+        if (r.status !== 'fulfilled') return;
+        const [listed, sold] = r.value;
+        newListed = newListed.concat(listed.map(e => ({
+          block: e.blockNumber, name: e.args.name,
+          seller: e.args.seller,
+          price: ethers.utils.formatUnits(e.args.price, 6),
+        })));
+        newSold = newSold.concat(sold.map(e => ({
+          block: e.blockNumber, name: e.args.name,
+          seller: e.args.seller, buyer: e.args.buyer,
+          price: ethers.utils.formatUnits(e.args.price, 6),
+        })));
+      });
+    }
+
+    return { newReg, newRen, newTr, newListed, newSold };
   }
 
   async function fetchAndRenderStats(prov) {
@@ -3165,14 +3206,16 @@
         if (cache) { renderStatsFromCache(cache, currentBlock); return; }
       }
 
-      const { newReg, newRen, newTr } = await scanNewBlocks(prov, registry, scanFrom, scanTo);
+      const { newReg, newRen, newTr, newListed, newSold } = await scanNewBlocks(prov, registry, scanFrom, scanTo);
 
       // Merge with existing cache
       const merged = {
         scannedToBlock: currentBlock,
-        reg: (cache ? cache.reg : []).concat(newReg),
-        ren: (cache ? cache.ren : []).concat(newRen),
-        tr:  (cache ? cache.tr  : []).concat(newTr),
+        reg:    (cache ? cache.reg    : []).concat(newReg),
+        ren:    (cache ? cache.ren    : []).concat(newRen),
+        tr:     (cache ? cache.tr     : []).concat(newTr),
+        listed: (cache ? cache.listed || [] : []).concat(newListed),
+        sold:   (cache ? cache.sold   || [] : []).concat(newSold),
       };
       setCache(merged);
       renderStatsFromCache(merged, currentBlock);
@@ -3184,7 +3227,6 @@
   }
 
   function renderStatsFromCache(cache, currentBlock) {
-    // paid is now stored as decimal string like "2.0" or "10.5"
     const fmt = (paidStr) => parseFloat(paidStr) || 0;
 
     const allReg = cache.reg.map(e => ({
@@ -3201,15 +3243,23 @@
       blockNumber: e.block,
       args: { name: e.name, to: e.to },
     }));
+    const allListed = (cache.listed || []).map(e => ({
+      blockNumber: e.block,
+      args: { name: e.name, seller: e.seller, price: e.price },
+    }));
+    const allSold = (cache.sold || []).map(e => ({
+      blockNumber: e.block,
+      args: { name: e.name, seller: e.seller, buyer: e.buyer, price: e.price },
+    }));
 
     // Pre-compute USDC from stored strings to avoid BigNumber issues
     const totalUSDC = cache.reg.reduce((s, e) => s + fmt(e.paid), 0)
                     + cache.ren.reduce((s, e) => s + fmt(e.paid), 0);
 
-    renderStatsFromData(allReg, allRen, allTr, currentBlock, totalUSDC);
+    renderStatsFromData(allReg, allRen, allTr, currentBlock, totalUSDC, allListed, allSold);
   }
 
-  function renderStatsFromData(allReg, allRen, allTr, currentBlock, precomputedUSDC) {
+  function renderStatsFromData(allReg, allRen, allTr, currentBlock, precomputedUSDC, allListed = [], allSold = []) {
 
       // ── KPI calculations ──
       const totalReg  = allReg.length;
@@ -3340,6 +3390,20 @@
           name:   e.args.name  || '?',
           owner:  e.args.to    || '',
           detail: `Transferred to ${(e.args.to || '').slice(0,6)}…${(e.args.to || '').slice(-4)}`,
+        })),
+        ...allListed.map(e => ({
+          type:   'list',
+          block:  e.blockNumber,
+          name:   e.args.name,
+          owner:  e.args.seller || '',
+          detail: `Listed for sale by ${(e.args.seller||'').slice(0,6)}…${(e.args.seller||'').slice(-4)} · $${safeFmt(e.args.price)} USDC`,
+        })),
+        ...allSold.map(e => ({
+          type:   'sale',
+          block:  e.blockNumber,
+          name:   e.args.name,
+          owner:  e.args.buyer || '',
+          detail: `Sold to ${(e.args.buyer||'').slice(0,6)}…${(e.args.buyer||'').slice(-4)} · $${safeFmt(e.args.price)} USDC`,
         })),
       ].sort((a, b) => b.block - a.block);
 
