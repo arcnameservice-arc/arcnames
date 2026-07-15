@@ -3026,12 +3026,22 @@
   }
 
   async function loadOnChainStats() {
+    const cache = getCache();
+    if (cache) {
+      renderStatsFromCache(cache, cache.scannedToBlock || 0);
+      setStatsLoadingState('Showing cached stats');
+      const tsEl = document.getElementById('statsLastUpdated');
+      if (tsEl) {
+        tsEl.style.display = 'block';
+        tsEl.textContent = 'Showing cached stats';
+      }
+    }
+
     try {
       const prov = getReadProvider();
       await fetchAndRenderStats(prov);
     } catch(e) {
       console.warn('Stats load failed:', e.message);
-      const cache = getCache();
       if (cache) {
         renderStatsFromCache(cache, cache.scannedToBlock || 0);
         setStatsLoadingState('Using cached stats; live refresh failed');
@@ -3075,12 +3085,25 @@
   // Cache key prefix — versioned so stale caches auto-invalidate
   const CACHE_VERSION = 'v3';
   const CACHE_KEY     = `arcnames_${CACHE_VERSION}_events`;
+  const LEGACY_CACHE_KEYS = ['arcnames_v2_events', 'arcnames_events'];
 
   function loadCacheFromStorage() {
     try {
       const raw = localStorage.getItem(CACHE_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
+      if (raw) return JSON.parse(raw);
+
+      for (const legacyKey of LEGACY_CACHE_KEYS) {
+        const legacyRaw = localStorage.getItem(legacyKey);
+        if (!legacyRaw) continue;
+        const legacyCache = JSON.parse(legacyRaw);
+        if (legacyCache) {
+          // Preserve old cached stats so users keep seeing historical data.
+          saveCacheToStorage(legacyCache);
+          return legacyCache;
+        }
+      }
+
+      return null;
     } catch(e) { return null; }
   }
 
@@ -3188,7 +3211,7 @@
   }
 
   async function fetchAndRenderStats(prov) {
-    setStatsLoadingState('…');
+    if (!getCache()) setStatsLoadingState('…');
     try {
       const readProv = prov || getReadProvider();
       const currentBlock = await readProv.getBlockNumber();
@@ -3249,34 +3272,40 @@
   }
 
   function renderStatsFromCache(cache, currentBlock) {
+    if (!cache) return;
     const fmt = (paidStr) => parseFloat(paidStr) || 0;
+    const regs = Array.isArray(cache.reg) ? cache.reg : [];
+    const rens = Array.isArray(cache.ren) ? cache.ren : [];
+    const trs = Array.isArray(cache.tr) ? cache.tr : [];
+    const listed = Array.isArray(cache.listed) ? cache.listed : [];
+    const sold = Array.isArray(cache.sold) ? cache.sold : [];
 
-    const allReg = cache.reg.map(e => ({
+    const allReg = regs.map(e => ({
       blockNumber: e.block,
       args: { name: e.name, owner: e.owner,
               paid: { _decimal: true, _val: parseFloat(e.paid) || 0, toString: () => e.paid } },
     }));
-    const allRen = cache.ren.map(e => ({
+    const allRen = rens.map(e => ({
       blockNumber: e.block,
       args: { name: e.name, owner: e.owner,
               paid: { _decimal: true, _val: parseFloat(e.paid) || 0, toString: () => e.paid } },
     }));
-    const allTr = cache.tr.map(e => ({
+    const allTr = trs.map(e => ({
       blockNumber: e.block,
       args: { name: e.name, to: e.to },
     }));
-    const allListed = (cache.listed || []).map(e => ({
+    const allListed = listed.map(e => ({
       blockNumber: e.block,
       args: { name: e.name, seller: e.seller, price: e.price },
     }));
-    const allSold = (cache.sold || []).map(e => ({
+    const allSold = sold.map(e => ({
       blockNumber: e.block,
       args: { name: e.name, seller: e.seller, buyer: e.buyer, price: e.price },
     }));
 
     // Pre-compute USDC from stored strings to avoid BigNumber issues
-    const totalUSDC = cache.reg.reduce((s, e) => s + fmt(e.paid), 0)
-                    + cache.ren.reduce((s, e) => s + fmt(e.paid), 0);
+    const totalUSDC = regs.reduce((s, e) => s + fmt(e.paid), 0)
+                    + rens.reduce((s, e) => s + fmt(e.paid), 0);
 
     renderStatsFromData(allReg, allRen, allTr, currentBlock, totalUSDC, allListed, allSold);
   }
@@ -4164,12 +4193,18 @@
   }
 
   function getReadProvider() {
-    // Use wallet provider first if available.
+    // Use connected wallet provider first if available.
     if (provider) return provider;
-    // If an injected wallet exists, use it for read calls even without an explicit connect.
+
+    // If an injected wallet exists and is already on Arc Testnet, use it.
     if (typeof window !== 'undefined' && window.ethereum) {
-      return new ethers.providers.Web3Provider(window.ethereum, 'any');
+      const chainIdHex = window.ethereum.chainId || window.ethereum._chainId || null;
+      const chainId = chainIdHex ? parseInt(chainIdHex, 16) : null;
+      if (chainId === ARC_CHAIN_ID_DEC) {
+        return new ethers.providers.Web3Provider(window.ethereum, 'any');
+      }
     }
+
     return getPublicProvider();
   }
 
