@@ -2492,10 +2492,10 @@
   let pollIntervals    = {};   // page → intervalId
 
   const POLL_INTERVALS = {
-    stats:   60_000,   // 60s
-    market:  60_000,   // 60s
-    mynames: 45_000,   // 45s
-    search:  30_000,   // 30s (re-checks current search result)
+    stats:   120_000,   // 120s
+    market:  120_000,   // 120s
+    mynames: 90_000,    // 90s
+    search:  45_000,    // 45s (re-checks current search result)
   };
 
   function startPolling(page) {
@@ -2624,8 +2624,7 @@
     let expiryTs  = null;
 
     try {
-      const readProvider = provider
-        || new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const readProvider = getReadProvider();
       const registry = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, readProvider);
       const rec = await registry.getRecord(raw);
       taken     = !rec.available;
@@ -2633,6 +2632,8 @@
       expiryTs  = rec.expiry.toNumber();
     } catch (e) {
       console.warn('getRecord failed:', e.message);
+      const hint = rpcErrorHint(e);
+      if (!provider && hint) showToast(hint);
       // Last-resort mock so the UI still renders something
       const MOCK_TAKEN = ['arc', 'defi', 'vito', 'nft', 'dao', 'eth', 'usdc', 'base'];
       taken = MOCK_TAKEN.includes(raw);
@@ -3026,20 +3027,14 @@
   }
 
   async function loadOnChainStats() {
-    if (!provider) {
-      // No wallet — use public RPC
-      try {
-        const pubProvider = new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
-        await fetchAndRenderStats(pubProvider);
-      } catch(e) {
-        console.warn('Stats load failed (no wallet):', e.message);
-        setStatsLoadingState('—');
-        const tsEl = document.getElementById('statsLastUpdated');
-        if (tsEl) tsEl.textContent = 'Could not connect to RPC';
-      }
-      return;
+    try {
+      // Always use public RPC for stats to avoid wallet rate limits
+      const pubProvider = getPublicProvider();
+      await fetchAndRenderStats(pubProvider);
+    } catch(e) {
+      console.warn('Stats load failed:', e.message);
+      setStatsLoadingState('—');
     }
-    await fetchAndRenderStats(provider);
   }
 
   // ── Block time measurement (dynamic) ──
@@ -3184,10 +3179,11 @@
   async function fetchAndRenderStats(prov) {
     setStatsLoadingState('…');
     try {
-      const currentBlock = await prov.getBlockNumber();
-      // Measure block time once per session
-      await measureBlockTime(prov);
-      const registry = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, prov);
+      // Force public RPC for all read operations
+      const readProv = getPublicProvider();
+      const currentBlock = await readProv.getBlockNumber();
+      await measureBlockTime(readProv);
+      const registry = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, readProv);
 
       // Load existing cache
       let cache = getCache();
@@ -3201,12 +3197,11 @@
       const scanFrom = cache ? cache.scannedToBlock + 1 : REGISTRY_DEPLOY_BLOCK;
       const scanTo   = currentBlock;
 
-      // If there's nothing new to scan (already up to date)
       if (scanFrom > scanTo) {
         if (cache) { renderStatsFromCache(cache, currentBlock); return; }
       }
 
-      const { newReg, newRen, newTr, newListed, newSold } = await scanNewBlocks(prov, registry, scanFrom, scanTo);
+      const { newReg, newRen, newTr, newListed, newSold } = await scanNewBlocks(readProv, registry, scanFrom, scanTo);
 
       // Merge with existing cache
       const merged = {
@@ -3512,10 +3507,10 @@
       return;
     }
 
-    const registry = getRegistry();
+    const registry = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, getPublicProvider());
     if (!registry) {
       namesFetching = false;
-      grid.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h3>Wallet not connected</h3><p>Connect your wallet to view your names.</p></div>`;
+      grid.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h3>Could not connect to RPC</h3><p>Please try again.</p></div>`;
       return;
     }
 
@@ -3891,7 +3886,7 @@
     if (!provider) {
       // Use public RPC for reading
       try {
-        const pubProv = new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
+        const pubProv = getReadProvider();
         await _fetchAndPopulateProfile(name, pubProv);
       } catch(e) { console.warn('Profile load failed:', e.message); }
     } else {
@@ -4120,11 +4115,39 @@
   }
 
   // ── Wallet — Arc Testnet (EIP-6963 multi-wallet) ──
+  const PUBLIC_RPC_URLS = [
+    'https://rpc.testnet.arc.network',
+    // Add additional Arc Testnet RPC endpoints here if you have them.
+    // Example: 'https://your-private-arc-node.example.com'
+  ];
+
+  function getPublicProvider() {
+    return new ethers.providers.JsonRpcProvider(PUBLIC_RPC_URLS[0]);
+  }
+
+  function getReadProvider() {
+    // Always use public RPC for read operations to avoid wallet rate limits.
+    // Wallet provider is only used for transaction signing.
+    return getPublicProvider();
+  }
+
+  function rpcErrorHint(error) {
+    if (!error) return 'RPC unavailable. Connect a wallet or try again later.';
+    const msg = (error.message || '').toLowerCase();
+    if (msg.includes('429') || msg.includes('rate limit') || msg.includes('too many requests')) {
+      return 'RPC rate limit reached. Connect a wallet or use a different RPC endpoint.';
+    }
+    if (msg.includes('timeout') || msg.includes('network') || msg.includes('connection') || msg.includes('failed to fetch')) {
+      return 'Could not reach Arc Testnet RPC. Connect wallet or try again later.';
+    }
+    return null;
+  }
+
   const ARC_TESTNET = {
     chainId:           '0x4CEF52',   // 5042002 decimal
     chainName:         'Arc Testnet',
     nativeCurrency:    { name: 'USDC', symbol: 'USDC', decimals: 18 },
-    rpcUrls:           ['https://rpc.testnet.arc.network'],
+    rpcUrls:           PUBLIC_RPC_URLS,
     blockExplorerUrls: ['https://testnet.arcscan.app'],
   };
   const ARC_CHAIN_ID_DEC = 5042002;
@@ -4667,7 +4690,7 @@
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon" style="font-size:32px;animation:spin 1s linear infinite;display:inline-block">⟳</div><h3>Loading listings…</h3></div>`;
 
     try {
-      const pubProvider = provider || new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const pubProvider = getPublicProvider();
       const mkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, pubProvider);
       const reg = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, pubProvider);
 
@@ -4701,7 +4724,8 @@
 
     } catch(e) {
       console.error('renderMarket error:', e);
-      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">⚠️</div><h3>Could not load listings</h3><p style="font-size:12px">${e.message}</p><button class="btn-sm primary" style="margin-top:12px" onclick="renderMarket()">Retry</button></div>`;
+      const hint = rpcErrorHint(e) || 'Try connecting your wallet or refreshing the page.';
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">⚠️</div><h3>Could not load listings</h3><p style="font-size:12px">${hint}</p><button class="btn-sm primary" style="margin-top:12px" onclick="renderMarket()">Retry</button></div>`;
     } finally {
       marketFetching = false;
     }
@@ -5142,7 +5166,7 @@
     }
     // Try to get primary name first, fallback to first name owned
     try {
-      const prov = provider || new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const prov = getReadProvider();
       const reg  = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, prov);
       let targetName = await reg.getPrimaryName(walletAddress).catch(() => '');
       if (!targetName) {
@@ -5200,7 +5224,7 @@
     document.title = name + '.arc — ArcNames';
 
     try {
-      const prov = provider || new ethers.providers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const prov = getReadProvider();
       const reg  = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, prov);
       const prof = new ethers.Contract(PROFILE_ADDRESS, PROFILE_ABI, prov);
 
