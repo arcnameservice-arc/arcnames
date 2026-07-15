@@ -2554,12 +2554,11 @@
     if (id === 'stats') {
       renderBarChartSkeleton();
       renderDistChartSkeleton();
-      // If stats cache is fresh (< 5 min), just re-render without full scan
-      if (_statsCache && _allStatsEvents.length > 0) {
+      if (!_statsCache) _statsCache = getCache();
+      if (_statsCache) {
         renderStatsFromCache(_statsCache, _statsCurrentBlock || _statsCache.scannedToBlock);
-      } else {
-        loadOnChainStats();
       }
+      loadOnChainStats();
       startPolling('stats');
     }
     if (id === 'market')  {
@@ -3028,12 +3027,22 @@
 
   async function loadOnChainStats() {
     try {
-      // Always use public RPC for stats to avoid wallet rate limits
-      const pubProvider = getPublicProvider();
-      await fetchAndRenderStats(pubProvider);
+      const prov = getReadProvider();
+      await fetchAndRenderStats(prov);
     } catch(e) {
       console.warn('Stats load failed:', e.message);
-      setStatsLoadingState('—');
+      const cache = getCache();
+      if (cache) {
+        renderStatsFromCache(cache, cache.scannedToBlock || 0);
+        setStatsLoadingState('Using cached stats; live refresh failed');
+      } else {
+        setStatsLoadingState('Error loading stats');
+      }
+      const tsEl = document.getElementById('statsLastUpdated');
+      if (tsEl) {
+        tsEl.style.display = 'block';
+        tsEl.textContent = rpcErrorHint(e) || 'Could not connect to RPC';
+      }
     }
   }
 
@@ -3083,6 +3092,7 @@
 
   // In-memory copy for the session (avoid re-parsing JSON)
   let _memCache = null;
+  let _statsCache = null;
 
   function getCache() {
     if (_memCache) return _memCache;
@@ -3092,13 +3102,14 @@
 
   function setCache(cache) {
     _memCache = cache;
+    _statsCache = cache;
     saveCacheToStorage(cache);
   }
 
   // Scan only the missing range, append to existing cache
   async function scanNewBlocks(prov, registry, fromBlock, toBlock) {
-    const CHUNK = 9999;
-    const BATCH = 3; // Keep low to avoid rate limiting
+    const CHUNK = 3000;
+    const BATCH = 2; // Keep low to reduce RPC pressure
     const ranges = [];
     for (let f = fromBlock; f <= toBlock; f += CHUNK) {
       ranges.push({ from: f, to: Math.min(f + CHUNK - 1, toBlock) });
@@ -3179,14 +3190,14 @@
   async function fetchAndRenderStats(prov) {
     setStatsLoadingState('…');
     try {
-      // Force public RPC for all read operations
-      const readProv = getPublicProvider();
+      const readProv = prov || getReadProvider();
       const currentBlock = await readProv.getBlockNumber();
       await measureBlockTime(readProv);
       const registry = new ethers.Contract(CONTRACT_ADDRESS, STATS_ABI, readProv);
 
       // Load existing cache
       let cache = getCache();
+      _statsCache = cache;
 
       // If cache is fresh enough (< 150 blocks ≈ 5 min), skip scan entirely
       if (cache && (currentBlock - cache.scannedToBlock) < 150) {
@@ -3217,7 +3228,23 @@
 
     } catch(e) {
       console.error('fetchAndRenderStats:', e);
-      setStatsLoadingState('Error: ' + e.message.slice(0, 40));
+      const cache = getCache();
+      if (cache) {
+        renderStatsFromCache(cache, cache.scannedToBlock || 0);
+        setStatsLoadingState('Using cached data — live refresh failed');
+        const tsEl = document.getElementById('statsLastUpdated');
+        if (tsEl) {
+          tsEl.style.display = 'block';
+          tsEl.textContent = 'Live refresh failed, showing cached stats';
+        }
+      } else {
+        setStatsLoadingState('Error: ' + (e.message || 'Could not load stats').slice(0, 40));
+        const tsEl = document.getElementById('statsLastUpdated');
+        if (tsEl) {
+          tsEl.style.display = 'block';
+          tsEl.textContent = 'Could not load stats';
+        }
+      }
     }
   }
 
@@ -3408,7 +3435,10 @@
 
       // Update last-updated timestamp
       const tsEl = document.getElementById('statsLastUpdated');
-      if (tsEl) tsEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+      if (tsEl) {
+        tsEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+        tsEl.style.display = 'block';
+      }
 
   } // end renderStatsFromData
 
@@ -4125,13 +4155,21 @@
     // Example: 'https://your-private-arc-node.example.com'
   ];
 
+  let _publicFallbackProvider = null;
   function getPublicProvider() {
-    return new ethers.providers.JsonRpcProvider(PUBLIC_RPC_URLS[0]);
+    if (_publicFallbackProvider) return _publicFallbackProvider;
+    const providers = PUBLIC_RPC_URLS.map(url => new ethers.providers.JsonRpcProvider(url));
+    _publicFallbackProvider = new ethers.providers.FallbackProvider(providers, 1);
+    return _publicFallbackProvider;
   }
 
   function getReadProvider() {
-    // Always use public RPC for read operations to avoid wallet rate limits.
-    // Wallet provider is only used for transaction signing.
+    // Use wallet provider first if available.
+    if (provider) return provider;
+    // If an injected wallet exists, use it for read calls even without an explicit connect.
+    if (typeof window !== 'undefined' && window.ethereum) {
+      return new ethers.providers.Web3Provider(window.ethereum, 'any');
+    }
     return getPublicProvider();
   }
 
