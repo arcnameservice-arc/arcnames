@@ -3098,7 +3098,7 @@
   // Scan only the missing range, append to existing cache
   async function scanNewBlocks(prov, registry, fromBlock, toBlock) {
     const CHUNK = 9999;
-    const BATCH = 8;
+    const BATCH = 3; // Keep low to avoid rate limiting
     const ranges = [];
     for (let f = fromBlock; f <= toBlock; f += CHUNK) {
       ranges.push({ from: f, to: Math.min(f + CHUNK - 1, toBlock) });
@@ -3538,8 +3538,12 @@
         return;
       }
 
-      // Fetch all records in parallel
-      const records = await Promise.all(names.map(n => registry.getRecord(n)));
+      // Fetch records sequentially to avoid rate limiting
+      const records = [];
+      for (const n of names) {
+        const r = await registry.getRecord(n).catch(() => null);
+        records.push(r);
+      }
 
       grid.innerHTML = '';
       names.forEach((name, i) => {
@@ -3627,7 +3631,7 @@
       const actRegistry  = new ethers.Contract(CONTRACT_ADDRESS, ACTIVITY_ABI, provider);
       const currentBlock = await provider.getBlockNumber();
       await measureBlockTime(provider);
-      const CHUNK = 9999, BATCH = 8;
+      const CHUNK = 9999, BATCH = 3;
       const addr  = walletAddress;
 
       // ── Incremental cache per wallet address ──
@@ -4879,7 +4883,7 @@
       const mkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, prov);
       const currentBlock = await prov.getBlockNumber();
       // Build ranges and scan in parallel batches of 6
-      const CHUNK = 9999; const BATCH = 6;
+      const CHUNK = 9999; const BATCH = 3;
       const mktRanges = [];
       for (let from = MARKET_DEPLOY_BLOCK; from <= currentBlock; from += CHUNK) {
         mktRanges.push({ from, to: Math.min(from + CHUNK - 1, currentBlock) });
@@ -5374,7 +5378,7 @@
       let addrCache = null;
       try { addrCache = JSON.parse(localStorage.getItem(addrCacheKey) || 'null'); } catch(e) {}
 
-      const CHUNK = 9999, BATCH = 8;
+      const CHUNK = 9999, BATCH = 3;
       let events = addrCache ? addrCache.events.map(e => ({...e, paid: parseFloat(e.paid) || 0})) : [];
 
       const regFrom = addrCache ? addrCache.scannedToBlock + 1 : REGISTRY_DEPLOY_BLOCK;
