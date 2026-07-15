@@ -1939,17 +1939,17 @@
 
     <div class="stats-row">
       <div class="stat">
-        <div class="stat-num" id="hero-total">—</div>
+        <div class="stat-num" id="hero-total">Loading...</div>
         <div class="stat-label">Names registered</div>
       </div>
       <div class="stat">
-        <div class="stat-num" id="hero-usdc">—</div>
+        <div class="stat-num" id="hero-usdc">Loading...</div>
         <div class="stat-label">USDC collected</div>
         <div class="stat-sub" id="hero-owners-sub" style="display:none">— unique owners</div>
       </div>
       <!-- Desktop-only stats -->
       <div class="stat desktop-stat">
-        <div class="stat-num" id="hero-owners">—</div>
+        <div class="stat-num" id="hero-owners">Loading...</div>
         <div class="stat-label">Unique owners</div>
       </div>
       <div class="stat desktop-stat">
@@ -2035,22 +2035,22 @@
     <div class="stats-kpi-grid">
       <div class="kpi-card featured">
         <div class="kpi-label">Total names registered</div>
-        <div class="kpi-value" id="kpi-total">—</div>
+        <div class="kpi-value" id="kpi-total">Loading...</div>
         <div class="kpi-delta up" id="kpi-total-delta" style="display:none"></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">USDC collected</div>
-        <div class="kpi-value" id="kpi-usdc">—</div>
+        <div class="kpi-value" id="kpi-usdc">Loading...</div>
         <div class="kpi-delta up" id="kpi-usdc-delta" style="display:none"></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Unique owners</div>
-        <div class="kpi-value" id="kpi-owners">—</div>
+        <div class="kpi-value" id="kpi-owners">Loading...</div>
         <div class="kpi-delta up" id="kpi-owners-delta" style="display:none"></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Avg. name length</div>
-        <div class="kpi-value" id="kpi-avglen">—</div>
+        <div class="kpi-value" id="kpi-avglen">Loading...</div>
         <div class="kpi-sub">characters</div>
       </div>
     </div>
@@ -3026,32 +3026,36 @@
   }
 
   async function loadOnChainStats() {
+    // Always show loading state first
+    setStatsLoadingState('Loading stats...');
+    
     const cache = getCache();
     if (cache) {
       renderStatsFromCache(cache, cache.scannedToBlock || 0);
-      setStatsLoadingState('Showing cached stats');
+      setStatsLoadingState('Updating stats...');
       const tsEl = document.getElementById('statsLastUpdated');
       if (tsEl) {
         tsEl.style.display = 'block';
-        tsEl.textContent = 'Showing cached stats';
+        tsEl.textContent = 'Updating...';
       }
     }
 
     try {
       const prov = getReadProvider();
       await fetchAndRenderStats(prov);
+      setStatsLoadingState(''); // Clear loading state on success
     } catch(e) {
       console.warn('Stats load failed:', e.message);
       if (cache) {
         renderStatsFromCache(cache, cache.scannedToBlock || 0);
-        setStatsLoadingState('Using cached stats; live refresh failed');
+        setStatsLoadingState('');
       } else {
-        setStatsLoadingState('Error loading stats');
+        setStatsLoadingState('Loading... (This may take a minute on first load)');
       }
       const tsEl = document.getElementById('statsLastUpdated');
       if (tsEl) {
         tsEl.style.display = 'block';
-        tsEl.textContent = rpcErrorHint(e) || 'Could not connect to RPC';
+        tsEl.textContent = cache ? 'Showing cached data' : 'Connecting...';
       }
     }
   }
@@ -3211,7 +3215,7 @@
   }
 
   async function fetchAndRenderStats(prov) {
-    if (!getCache()) setStatsLoadingState('…');
+    setStatsLoadingState('Scanning blockchain...');
     try {
       const readProv = prov || getReadProvider();
       const currentBlock = await readProv.getBlockNumber();
@@ -3225,6 +3229,7 @@
       // If cache is fresh enough (< 150 blocks ≈ 5 min), skip scan entirely
       if (cache && (currentBlock - cache.scannedToBlock) < 150) {
         renderStatsFromCache(cache, currentBlock);
+        setStatsLoadingState('');
         return;
       }
 
@@ -3232,7 +3237,16 @@
       const scanTo   = currentBlock;
 
       if (scanFrom > scanTo) {
-        if (cache) { renderStatsFromCache(cache, currentBlock); return; }
+        if (cache) { 
+          renderStatsFromCache(cache, currentBlock); 
+          setStatsLoadingState('');
+          return; 
+        }
+      }
+
+      // Show progress for first-time users
+      if (!cache) {
+        setStatsLoadingState('First load: scanning blockchain events... (this may take 30-60 seconds)');
       }
 
       const { newReg, newRen, newTr, newListed, newSold } = await scanNewBlocks(readProv, registry, scanFrom, scanTo);
@@ -3248,24 +3262,25 @@
       };
       setCache(merged);
       renderStatsFromCache(merged, currentBlock);
+      setStatsLoadingState('');
 
     } catch(e) {
       console.error('fetchAndRenderStats:', e);
       const cache = getCache();
       if (cache) {
         renderStatsFromCache(cache, cache.scannedToBlock || 0);
-        setStatsLoadingState('Using cached data — live refresh failed');
+        setStatsLoadingState('');
         const tsEl = document.getElementById('statsLastUpdated');
         if (tsEl) {
           tsEl.style.display = 'block';
-          tsEl.textContent = 'Live refresh failed, showing cached stats';
+          tsEl.textContent = 'Showing cached stats (refresh failed)';
         }
       } else {
-        setStatsLoadingState('Error: ' + (e.message || 'Could not load stats').slice(0, 40));
+        setStatsLoadingState('Error: Unable to connect to blockchain RPC. Please refresh the page.');
         const tsEl = document.getElementById('statsLastUpdated');
         if (tsEl) {
           tsEl.style.display = 'block';
-          tsEl.textContent = 'Could not load stats';
+          tsEl.textContent = 'Connection error - please refresh';
         }
       }
     }
@@ -3538,10 +3553,18 @@
   }
 
   function setStatsLoadingState(msg) {
+    // Update KPI cards
     const ids = ['kpi-total','kpi-usdc','kpi-owners','kpi-avglen','kpi-renewals','kpi-transfers'];
     ids.forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.textContent = msg;
+      if (el) el.textContent = msg || '—';
+    });
+    
+    // Also update hero stats on homepage
+    const heroIds = ['hero-total', 'hero-usdc', 'hero-owners'];
+    heroIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = msg || '—';
     });
   }
 
