@@ -16,3 +16,4 @@ Thumbs.db
 
 # Keep arcnames_v4.html out (index.html is the canonical version)
 arcnames_v4.html
+.vercel
