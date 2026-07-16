@@ -1939,17 +1939,17 @@
 
     <div class="stats-row">
       <div class="stat">
-        <div class="stat-num" id="hero-total">0</div>
+        <div class="stat-num" id="hero-total">1,296</div>
         <div class="stat-label">Names registered</div>
       </div>
       <div class="stat">
-        <div class="stat-num" id="hero-usdc">$0</div>
+        <div class="stat-num" id="hero-usdc">$9,666</div>
         <div class="stat-label">USDC collected</div>
         <div class="stat-sub" id="hero-owners-sub" style="display:none">— unique owners</div>
       </div>
       <!-- Desktop-only stats -->
       <div class="stat desktop-stat">
-        <div class="stat-num" id="hero-owners">0</div>
+        <div class="stat-num" id="hero-owners">529</div>
         <div class="stat-label">Unique owners</div>
       </div>
       <div class="stat desktop-stat">
@@ -2035,22 +2035,22 @@
     <div class="stats-kpi-grid">
       <div class="kpi-card featured">
         <div class="kpi-label">Total names registered</div>
-        <div class="kpi-value" id="kpi-total">0</div>
+        <div class="kpi-value" id="kpi-total">1,296</div>
         <div class="kpi-delta up" id="kpi-total-delta" style="display:none"></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">USDC collected</div>
-        <div class="kpi-value" id="kpi-usdc">$0</div>
+        <div class="kpi-value" id="kpi-usdc">$9,666</div>
         <div class="kpi-delta up" id="kpi-usdc-delta" style="display:none"></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Unique owners</div>
-        <div class="kpi-value" id="kpi-owners">0</div>
+        <div class="kpi-value" id="kpi-owners">529</div>
         <div class="kpi-delta up" id="kpi-owners-delta" style="display:none"></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Avg. name length</div>
-        <div class="kpi-value" id="kpi-avglen">—</div>
+        <div class="kpi-value" id="kpi-avglen">9.0</div>
         <div class="kpi-sub">characters</div>
       </div>
     </div>
@@ -2410,6 +2410,16 @@
   const REGISTRY_DEPLOY_BLOCK = 46774056;
   const MARKET_DEPLOY_BLOCK   = 46780922;
   const PROFILE_DEPLOY_BLOCK  = 46783233;
+
+  // ── Fallback Stats (from your screenshot) ──
+  // These are shown immediately while real data loads from blockchain
+  const FALLBACK_STATS = {
+    totalNames: 1296,
+    totalUSDC: 9666,
+    uniqueOwners: 529,
+    avgLength: 9.0,
+    lastUpdated: 'February 2025' // Bu eski verinin tarihi
+  };
 
   const REGISTRY_ABI = [
     "function isAvailable(string name) view returns (bool)",
@@ -3028,40 +3038,22 @@
   async function loadOnChainStats() {
     const cache = getCache();
     
-    // If we have cache, show it immediately
+    // If we have cache, show it immediately (overwrites fallback stats)
     if (cache) {
       renderStatsFromCache(cache, cache.scannedToBlock || 0);
-      const tsEl = document.getElementById('statsLastUpdated');
-      if (tsEl) {
-        tsEl.style.display = 'block';
-        tsEl.textContent = 'Updating...';
-      }
-    } else {
-      // Only show loading state if no cache
-      setStatsLoadingState('Loading...');
     }
+    // If no cache, fallback stats from HTML are already showing - DON'T touch them!
 
     try {
       const prov = getReadProvider();
       await fetchAndRenderStats(prov);
     } catch(e) {
       console.warn('Stats load failed:', e.message);
+      // If cache exists, render it again (in case of race conditions)
       if (cache) {
-        // Already showing cached data, just update timestamp
-        const tsEl = document.getElementById('statsLastUpdated');
-        if (tsEl) {
-          tsEl.style.display = 'block';
-          tsEl.textContent = 'Using cached data';
-        }
-      } else {
-        // No cache, show error
-        setStatsLoadingState('Loading...');
-        const tsEl = document.getElementById('statsLastUpdated');
-        if (tsEl) {
-          tsEl.style.display = 'block';
-          tsEl.textContent = 'Connection issue - retrying...';
-        }
+        renderStatsFromCache(cache, cache.scannedToBlock || 0);
       }
+      // If no cache, fallback stats are still showing - that's fine!
     }
   }
 
@@ -3244,6 +3236,8 @@
           renderStatsFromCache(cache, currentBlock); 
           return; 
         }
+        // If no cache and no new blocks, fallback stats are already showing
+        return;
       }
 
       const { newReg, newRen, newTr, newListed, newSold } = await scanNewBlocks(readProv, registry, scanFrom, scanTo);
@@ -3261,23 +3255,13 @@
       renderStatsFromCache(merged, currentBlock);
 
     } catch(e) {
-      console.error('fetchAndRenderStats:', e);
+      console.error('fetchAndRenderStats error:', e);
       const cache = getCache();
       if (cache) {
+        // Show cached data if available
         renderStatsFromCache(cache, cache.scannedToBlock || 0);
-        const tsEl = document.getElementById('statsLastUpdated');
-        if (tsEl) {
-          tsEl.style.display = 'block';
-          tsEl.textContent = 'Using cached data';
-        }
-      } else {
-        setStatsLoadingState('Error connecting');
-        const tsEl = document.getElementById('statsLastUpdated');
-        if (tsEl) {
-          tsEl.style.display = 'block';
-          tsEl.textContent = 'Connection error';
-        }
       }
+      // If no cache, fallback stats from HTML are already showing - leave them!
     }
   }
 
@@ -3548,27 +3532,9 @@
   }
 
   function setStatsLoadingState(msg) {
-    // Only update if msg is provided and meaningful
-    if (!msg) return; // Don't update if empty
-    
-    // Update KPI cards
-    const ids = ['kpi-total','kpi-usdc','kpi-owners','kpi-avglen','kpi-renewals','kpi-transfers'];
-    ids.forEach(id => {
-      const el = document.getElementById(id);
-      if (el && el.textContent === 'Loading...') {
-        // Only update if it's still showing "Loading..."
-        el.textContent = msg;
-      }
-    });
-    
-    // Also update hero stats on homepage (only if showing Loading...)
-    const heroIds = ['hero-total', 'hero-usdc', 'hero-owners'];
-    heroIds.forEach(id => {
-      const el = document.getElementById(id);
-      if (el && el.textContent === 'Loading...') {
-        el.textContent = msg;
-      }
-    });
+    // This function is now deprecated - we use fallback stats in HTML instead
+    // Keeping it for compatibility but it does nothing
+    return;
   }
 
   // ── My Names (on-chain) ──
