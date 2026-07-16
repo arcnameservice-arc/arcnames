@@ -4794,24 +4794,6 @@
   let cachedListings = [];
   let cachedSales    = [];
   let marketFetching = false;
-  let marketUsingFallback = false;
-
-  const MARKET_FALLBACK_LISTINGS = [
-    { name: 'satoshi', seller: '0x1111111111111111111111111111111111111111', price: 14, listedAt: Math.floor(Date.now()/1000) - 3600, expiry: Math.floor(Date.now()/1000) + 86400 * 365, demo: true },
-    { name: 'vito', seller: '0x2222222222222222222222222222222222222222', price: 10, listedAt: Math.floor(Date.now()/1000) - 5400, expiry: Math.floor(Date.now()/1000) + 86400 * 300, demo: true },
-    { name: 'arc', seller: '0x3333333333333333333333333333333333333333', price: 8, listedAt: Math.floor(Date.now()/1000) - 7200, expiry: Math.floor(Date.now()/1000) + 86400 * 240, demo: true },
-    { name: 'defi', seller: '0x4444444444444444444444444444444444444444', price: 6, listedAt: Math.floor(Date.now()/1000) - 9000, expiry: Math.floor(Date.now()/1000) + 86400 * 180, demo: true },
-    { name: 'nft', seller: '0x5555555555555555555555555555555555555555', price: 5, listedAt: Math.floor(Date.now()/1000) - 10800, expiry: Math.floor(Date.now()/1000) + 86400 * 120, demo: true },
-  ];
-
-  function getFallbackListings() {
-    return MARKET_FALLBACK_LISTINGS.map(item => ({
-      ...item,
-      listedAt: Math.floor(Date.now()/1000) - Math.floor(Math.random() * 7200),
-      expiry: Math.floor(Date.now()/1000) + 86400 * 180,
-      demo: true,
-    }));
-  }
   // Pagination state
   const MARKET_PER_PAGE = 12;
   let marketCurrentPage = 1;
@@ -4826,7 +4808,6 @@
     marketFetching = true;
     const grid    = document.getElementById('marketGrid');
     const salesEl = document.getElementById('recentSalesList');
-    marketUsingFallback = false;
 
     // Show cached data immediately if available
     if (cachedListings.length > 0) {
@@ -4836,71 +4817,49 @@
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon" style="font-size:32px">⟳</div><h3>Loading listings…</h3></div>`;
     }
 
-    let pubProvider = null;
     try {
-      pubProvider = getPublicProvider();
+      const pubProvider = getPublicProvider();
       const mkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, pubProvider);
       const reg = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, pubProvider);
 
-      const chainPromise = (async () => {
-        // Fetch listings (up to 50)
-        const result = await mkt.getActiveListings(0, 50);
-        const names    = result.names    || result[0];
-        const sellers  = result.sellers  || result[1];
-        const prices   = result.prices   || result[2];
-        const listedAts= result.listedAts|| result[3];
+      // Fetch listings (up to 50)
+      const result = await mkt.getActiveListings(0, 50);
+      const names    = result.names    || result[0];
+      const sellers  = result.sellers  || result[1];
+      const prices   = result.prices   || result[2];
+      const listedAts= result.listedAts|| result[3];
 
-        if (!Array.isArray(names) || names.length === 0) {
-          throw new Error('No market listings returned from chain');
-        }
-
-        // Fetch expiry for each name in parallel (batch of 10 at a time for speed)
-        const BATCH_SIZE = 10;
-        const records = [];
-        for (let i = 0; i < names.length; i += BATCH_SIZE) {
-          const batch = names.slice(i, i + BATCH_SIZE);
-          const batchRecords = await Promise.all(
-            batch.map(n => reg.getRecord(n).catch(() => null))
-          );
-          records.push(...batchRecords);
-        }
-
-        return names.map((name, i) => ({
-          name,
-          seller:   sellers[i],
-          price:    parseFloat(ethers.utils.formatUnits(prices[i], 6)),
-          priceRaw: prices[i],
-          listedAt: listedAts[i].toNumber(),
-          expiry:   records[i] ? records[i].expiry.toNumber() : 0,
-        }));
-      })();
-
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Market RPC timeout')), 7000);
-      });
-
-      const resolvedListings = await Promise.race([chainPromise, timeoutPromise]);
-      if (!resolvedListings || resolvedListings.length === 0) {
-        throw new Error('No listings returned');
+      // Fetch expiry for each name in parallel (batch of 10 at a time for speed)
+      const BATCH_SIZE = 10;
+      const records = [];
+      for (let i = 0; i < names.length; i += BATCH_SIZE) {
+        const batch = names.slice(i, i + BATCH_SIZE);
+        const batchRecords = await Promise.all(
+          batch.map(n => reg.getRecord(n).catch(() => null))
+        );
+        records.push(...batchRecords);
       }
 
-      cachedListings = resolvedListings;
-      marketUsingFallback = false;
+      // Build listings array
+      cachedListings = names.map((name, i) => ({
+        name,
+        seller:   sellers[i],
+        price:    parseFloat(ethers.utils.formatUnits(prices[i], 6)),
+        priceRaw: prices[i],
+        listedAt: listedAts[i].toNumber(),
+        expiry:   records[i] ? records[i].expiry.toNumber() : 0,
+      }));
+
+      // Apply filters
       applyMarketFilter();
 
       // Load recent sales in background (don't wait)
       loadRecentSales(pubProvider).catch(e => console.warn('Sales load failed:', e));
 
     } catch(e) {
-      console.warn('renderMarket using fallback data:', e);
-      if (cachedListings.length === 0) {
-        cachedListings = getFallbackListings();
-        marketUsingFallback = true;
-      }
-      applyMarketFilter();
-      if (pubProvider) {
-        loadRecentSales(pubProvider).catch(err => console.warn('Sales load failed:', err));
-      }
+      console.error('renderMarket error:', e);
+      const hint = rpcErrorHint(e) || 'Try connecting your wallet or refreshing the page.';
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">⚠️</div><h3>Could not load listings</h3><p style="font-size:12px">${hint}</p><button class="btn-sm primary" style="margin-top:12px" onclick="renderMarket()">Retry</button></div>`;
     } finally {
       marketFetching = false;
     }
@@ -4958,11 +4917,8 @@
 
     const start = (marketCurrentPage - 1) * MARKET_PER_PAGE;
     const pageItems = list.slice(start, start + MARKET_PER_PAGE);
-    const notice = marketUsingFallback && pageItems.length > 0
-      ? `<div style="grid-column:1/-1;margin-bottom:12px;padding:10px 14px;border:1px solid rgba(245,158,11,0.24);background:rgba(245,158,11,0.10);color:var(--warn);border-radius:10px;font-size:13px">Showing demo marketplace listings while the Arc RPC is temporarily rate-limited.</div>`
-      : '';
 
-    grid.innerHTML = notice + pageItems.map(item => {
+    grid.innerHTML = pageItems.map(item => {
       const chars       = item.name.length;
       const sellerShort = item.seller.slice(0,6) + '…' + item.seller.slice(-4);
       const isOwn       = walletConnected && item.seller.toLowerCase() === walletAddress.toLowerCase();
