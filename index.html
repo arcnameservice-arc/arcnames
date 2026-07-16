@@ -4233,8 +4233,16 @@
   let _publicFallbackProvider = null;
   function getPublicProvider() {
     if (_publicFallbackProvider) return _publicFallbackProvider;
-    const providers = PUBLIC_RPC_URLS.map(url => new ethers.providers.JsonRpcProvider(url));
-    _publicFallbackProvider = new ethers.providers.FallbackProvider(providers, 1);
+    // Use single provider with optimized settings for faster response
+    _publicFallbackProvider = new ethers.providers.JsonRpcProvider(
+      PUBLIC_RPC_URLS[0],
+      {
+        chainId: ARC_CHAIN_ID_DEC,
+        name: 'Arc Testnet'
+      }
+    );
+    // Set faster timeout and polling
+    _publicFallbackProvider.pollingInterval = 4000;
     return _publicFallbackProvider;
   }
 
@@ -4802,6 +4810,36 @@
   let _allStatsEvents = [];
   let _statsActPage   = 1;
   const STATS_ACT_PER_PAGE = 10;
+  
+  // Market cache key
+  const MARKET_CACHE_KEY = 'arcnames_market_cache_v1';
+  const MARKET_CACHE_TTL = 60000; // 60 seconds
+
+  function getMarketCache() {
+    try {
+      const cache = localStorage.getItem(MARKET_CACHE_KEY);
+      if (!cache) return null;
+      const data = JSON.parse(cache);
+      if (Date.now() - data.timestamp > MARKET_CACHE_TTL) {
+        localStorage.removeItem(MARKET_CACHE_KEY);
+        return null;
+      }
+      return data.listings;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  function setMarketCache(listings) {
+    try {
+      localStorage.setItem(MARKET_CACHE_KEY, JSON.stringify({
+        timestamp: Date.now(),
+        listings: listings
+      }));
+    } catch(e) {
+      console.warn('Failed to cache market data:', e);
+    }
+  }
 
   async function renderMarket() {
     if (marketFetching) return;
@@ -4809,8 +4847,13 @@
     const grid    = document.getElementById('marketGrid');
     const salesEl = document.getElementById('recentSalesList');
 
-    // Show cached data immediately if available
-    if (cachedListings.length > 0) {
+    // Try to load from cache first
+    const cached = getMarketCache();
+    if (cached && cached.length > 0) {
+      cachedListings = cached;
+      applyMarketFilter();
+    } else if (cachedListings.length > 0) {
+      // Use in-memory cache
       applyMarketFilter();
     } else {
       // Loading state only if no cache
@@ -4820,7 +4863,6 @@
     try {
       const pubProvider = getPublicProvider();
       const mkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, pubProvider);
-      const reg = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, pubProvider);
 
       // Fetch listings (up to 50)
       const result = await mkt.getActiveListings(0, 50);
@@ -4829,29 +4871,52 @@
       const prices   = result.prices   || result[2];
       const listedAts= result.listedAts|| result[3];
 
-      // Fetch expiry for each name in parallel (batch of 10 at a time for speed)
-      const BATCH_SIZE = 10;
-      const records = [];
-      for (let i = 0; i < names.length; i += BATCH_SIZE) {
-        const batch = names.slice(i, i + BATCH_SIZE);
-        const batchRecords = await Promise.all(
-          batch.map(n => reg.getRecord(n).catch(() => null))
-        );
-        records.push(...batchRecords);
-      }
-
-      // Build listings array
+      // Build listings array WITHOUT expiry first (show immediately)
       cachedListings = names.map((name, i) => ({
         name,
         seller:   sellers[i],
         price:    parseFloat(ethers.utils.formatUnits(prices[i], 6)),
         priceRaw: prices[i],
         listedAt: listedAts[i].toNumber(),
-        expiry:   records[i] ? records[i].expiry.toNumber() : 0,
+        expiry:   0, // Will be updated in background
       }));
 
-      // Apply filters
+      // Cache the listings
+      setMarketCache(cachedListings);
+
+      // Apply filters and show data immediately
       applyMarketFilter();
+
+      // Fetch expiry for each name in background (non-blocking)
+      const reg = new ethers.Contract(CONTRACT_ADDRESS, REGISTRY_ABI, pubProvider);
+      const BATCH_SIZE = 20; // Larger batch for better performance
+      const fetchExpiries = async () => {
+        const records = [];
+        for (let i = 0; i < names.length; i += BATCH_SIZE) {
+          const batch = names.slice(i, i + BATCH_SIZE);
+          const batchRecords = await Promise.all(
+            batch.map(n => reg.getRecord(n).catch(() => null))
+          );
+          records.push(...batchRecords);
+        }
+        
+        // Update cached listings with expiry data
+        cachedListings.forEach((listing, i) => {
+          if (records[i]) {
+            listing.expiry = records[i].expiry.toNumber();
+          }
+        });
+        
+        // Update cache with expiry data
+        setMarketCache(cachedListings);
+        
+        // Re-render to show updated expiry dates
+        if (document.getElementById('marketPage').classList.contains('active')) {
+          renderMarketPage();
+        }
+      };
+      
+      fetchExpiries().catch(e => console.warn('Failed to fetch expiry data:', e));
 
       // Load recent sales in background (don't wait)
       loadRecentSales(pubProvider).catch(e => console.warn('Sales load failed:', e));
@@ -4918,34 +4983,42 @@
     const start = (marketCurrentPage - 1) * MARKET_PER_PAGE;
     const pageItems = list.slice(start, start + MARKET_PER_PAGE);
 
-    grid.innerHTML = pageItems.map(item => {
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+    
+    pageItems.forEach(item => {
       const chars       = item.name.length;
       const sellerShort = item.seller.slice(0,6) + '…' + item.seller.slice(-4);
       const isOwn       = walletConnected && item.seller.toLowerCase() === walletAddress.toLowerCase();
       const expiryStr   = item.expiry
         ? new Date(item.expiry * 1000).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
-        : '—';
+        : 'Loading...';
       const listedStr = timeAgo(item.listedAt);
-      return `
-        <div class="market-card">
-          <div class="market-card-top">
-            <div class="market-name" style="cursor:pointer" onclick="goToProfile('${item.name}')">${item.name}<span>.arc</span></div>
-            <span class="market-len-badge">${chars}-char</span>
-          </div>
-          <div class="market-seller">Seller: ${isOwn ? '<strong style="color:var(--arc)">You</strong>' : sellerShort}</div>
-          <div class="market-price-row">
-            <div class="market-price">$${item.price.toLocaleString()} <sub>USDC</sub></div>
-            ${isOwn
-              ? `<button class="btn-buy" style="background:rgba(239,68,68,0.1);border-color:var(--danger);color:var(--danger)" onclick="doCancelListing('${item.name}')">Cancel</button>`
-              : `<button class="btn-buy" onclick="doBuy('${item.name}', ${item.price})">Buy Now</button>`
-            }
-          </div>
-          <div class="market-card-footer">
-            <span><span class="listed-badge">● LISTED</span> ${listedStr}</span>
-            <span>Exp: ${expiryStr}</span>
-          </div>
+      
+      const card = document.createElement('div');
+      card.className = 'market-card';
+      card.innerHTML = `
+        <div class="market-card-top">
+          <div class="market-name" style="cursor:pointer" onclick="goToProfile('${item.name}')">${item.name}<span>.arc</span></div>
+          <span class="market-len-badge">${chars}-char</span>
+        </div>
+        <div class="market-seller">Seller: ${isOwn ? '<strong style="color:var(--arc)">You</strong>' : sellerShort}</div>
+        <div class="market-price-row">
+          <div class="market-price">$${item.price.toLocaleString()} <sub>USDC</sub></div>
+          ${isOwn
+            ? `<button class="btn-buy" style="background:rgba(239,68,68,0.1);border-color:var(--danger);color:var(--danger)" onclick="doCancelListing('${item.name}')">Cancel</button>`
+            : `<button class="btn-buy" onclick="doBuy('${item.name}', ${item.price})">Buy Now</button>`
+          }
+        </div>
+        <div class="market-card-footer">
+          <span><span class="listed-badge">● LISTED</span> ${listedStr}</span>
+          <span>Exp: ${expiryStr}</span>
         </div>`;
-    }).join('');
+      fragment.appendChild(card);
+    });
+    
+    grid.innerHTML = '';
+    grid.appendChild(fragment);
 
     renderPagination(totalPages);
   }
@@ -5009,15 +5082,27 @@
   async function loadRecentSales(prov) {
     const salesEl = document.getElementById('recentSalesList');
     if (!salesEl) return;
+    
+    // Show loading state
+    salesEl.innerHTML = `<div style="color:var(--muted2);font-size:13px;text-align:center;padding:16px">Loading sales...</div>`;
+    
     try {
       const mkt = new ethers.Contract(MARKET_ADDRESS, MARKET_ABI, prov);
       const currentBlock = await prov.getBlockNumber();
-      // Build ranges and scan in parallel batches
-      const CHUNK = 15000; const BATCH = 5; // Increased for speed
+      
+      // Optimize: only scan recent blocks (last ~7 days worth of blocks)
+      // Arc testnet: ~1 block/sec = 86400 blocks/day = ~604800 blocks/week
+      const RECENT_BLOCKS = 604800; 
+      const fromBlock = Math.max(MARKET_DEPLOY_BLOCK, currentBlock - RECENT_BLOCKS);
+      
+      // Fetch in larger chunks for speed
+      const CHUNK = 30000; 
+      const BATCH = 3;
       const mktRanges = [];
-      for (let from = MARKET_DEPLOY_BLOCK; from <= currentBlock; from += CHUNK) {
+      for (let from = fromBlock; from <= currentBlock; from += CHUNK) {
         mktRanges.push({ from, to: Math.min(from + CHUNK - 1, currentBlock) });
       }
+      
       let soldEvents = [];
       for (let i = 0; i < mktRanges.length; i += BATCH) {
         const batch = mktRanges.slice(i, i + BATCH);
@@ -5026,6 +5111,7 @@
         ));
         results.forEach(r => { if (r.status === 'fulfilled') soldEvents = soldEvents.concat(r.value); });
       }
+      
       soldEvents.sort((a,b) => b.blockNumber - a.blockNumber);
       cachedSales = soldEvents.slice(0, 10).map(e => ({
         name:  e.args.name,
